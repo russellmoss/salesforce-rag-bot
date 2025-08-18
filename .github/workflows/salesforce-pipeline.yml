@@ -30,7 +30,7 @@ jobs:
           
       - name: Authenticate to Salesforce
         run: |
-          echo ${{ secrets.SFDX_AUTH_URL }} | sf org login sfdx-url --set-default-dev-hub
+          echo "${{ secrets.SFDX_AUTH_URL }}" | sf org login sfdx-url --sfdx-url-stdin --set-default-dev-hub
           
       - name: Run Full Pipeline
         run: |
