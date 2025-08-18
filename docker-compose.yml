@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  salesforce-pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: salesforce-rag-bot:latest
+    container_name: salesforce-pipeline
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount output directory for data persistence
+      - ./output:/app/output
+      # Mount environment file (if exists)
+      - ./.env:/app/.env:ro
+    command: ["--help"]
+    profiles:
+      - test
+      - development
+
+  salesforce-pipeline-run:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: salesforce-rag-bot:latest
+    container_name: salesforce-pipeline-run
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount output directory for data persistence
+      - ./output:/app/output
+      # Mount environment file (if exists)
+      - ./.env:/app/.env:ro
+    # This will be overridden with actual parameters when running
+    command: ["--org-alias", "your-org", "--output", "/app/output"]
+    profiles:
+      - production
+
+  # Development service for interactive testing
+  salesforce-pipeline-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: salesforce-rag-bot:dev
+    container_name: salesforce-pipeline-dev
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount source code for development
+      - ./src:/app/src
+      - ./output:/app/output
+      - ./.env:/app/.env:ro
+    working_dir: /app
+    command: ["tail", "-f", "/dev/null"]  # Keep container running
+    profiles:
+      - development
+
+networks:
+  default:
+    name: salesforce-rag-network

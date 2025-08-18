@@ -1,0 +1,71 @@
+name: Salesforce Schema Pipeline
+
+on:
+  schedule:
+    - cron: '0 12 * * *'  # Daily at 12 PM UTC
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  schema-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 480  # 8 hours max
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r src/chatbot/requirements.txt
+          
+      - name: Install Salesforce CLI
+        run: |
+          npm install --global @salesforce/cli
+          
+      - name: Authenticate to Salesforce
+        run: |
+          echo ${{ secrets.SFDX_AUTH_URL }} | sf org login sfdx-url --set-default-dev-hub
+          
+      - name: Run Full Pipeline
+        run: |
+          python src/pipeline/build_schema_library_end_to_end.py \
+            --org-alias ${{ secrets.SF_ORG_ALIAS }} \
+            --output ./output \
+            --with-metadata \
+            --emit-markdown \
+            --emit-jsonl \
+            --push-to-pinecone \
+            --resume \
+            --stats-resume \
+            --max-workers 15
+        env:
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
+          PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: schema-output
+          path: output/
+          
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "✅ Pipeline completed successfully!"
+          echo "📊 Generated files:"
+          ls -la output/
+          echo "📁 Markdown files: $(ls output/md/ | wc -l)"
+          
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Pipeline failed!"

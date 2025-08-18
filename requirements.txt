@@ -1,0 +1,22 @@
+# Core dependencies
+pinecone>=3.0.0
+openai>=1.0.0
+python-dotenv>=1.0.0
+tiktoken>=0.5.0
+
+# LangChain ecosystem
+langchain>=0.1.0
+langchain-community>=0.0.20
+langchain-openai>=0.0.5
+langchain-anthropic>=0.1.0
+langchain-google-genai>=0.0.6
+langchain-pinecone>=0.1.0
+
+# Salesforce CLI (for Docker)
+# Will be installed via curl in Dockerfile (not in requirements.txt)
+# Note: curl is a system dependency, not a Python package
+
+# Additional utilities
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
