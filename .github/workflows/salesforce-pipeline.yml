@@ -35,7 +35,7 @@ jobs:
       - name: Run Full Pipeline
         run: |
           python src/pipeline/build_schema_library_end_to_end.py \
-            --org-alias ${{ secrets.SF_ORG_ALIAS }} \
+            --org-alias "DEVNEW" \
             --output ./output \
             --with-metadata \
             --emit-markdown \
