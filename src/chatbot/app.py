@@ -72,15 +72,23 @@ st.markdown("""
 def initialize_rag_service():
     """Initialize the RAG service with caching"""
     try:
-        # Check if environment variables are set
+        # Check if environment variables are set (try Streamlit secrets first, then .env)
         import os
         from dotenv import load_dotenv
-        load_dotenv()
         
-        pinecone_key = os.getenv("PINECONE_API_KEY")
-        openai_key = os.getenv("OPENAI_API_KEY")
-        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-        google_key = os.getenv("GOOGLE_API_KEY")
+        # Try to get from Streamlit secrets first
+        try:
+            pinecone_key = st.secrets.get("PINECONE_API_KEY")
+            openai_key = st.secrets.get("OPENAI_API_KEY")
+            anthropic_key = st.secrets.get("ANTHROPIC_API_KEY")
+            google_key = st.secrets.get("GOOGLE_API_KEY")
+        except:
+            # Fallback to .env file for local development
+            load_dotenv()
+            pinecone_key = os.getenv("PINECONE_API_KEY")
+            openai_key = os.getenv("OPENAI_API_KEY")
+            anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+            google_key = os.getenv("GOOGLE_API_KEY")
         
         if not pinecone_key or not any([openai_key, anthropic_key, google_key]):
             return None
@@ -161,7 +169,12 @@ def main():
         
         The RAG service is not configured. This is normal if you haven't set up your API keys yet.
         
-        **To get started:**
+        **For Streamlit Cloud deployment:**
+        1. Go to your app settings in Streamlit Cloud
+        2. Click "Secrets" and add your API keys
+        3. The app will automatically redeploy
+        
+        **For local development:**
         1. Create a `.env` file in the root directory
         2. Add your API keys (see SETUP.md for details)
         3. Restart the application
