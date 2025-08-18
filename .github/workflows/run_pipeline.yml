@@ -28,10 +28,7 @@ jobs:
 
       - name: Install Salesforce CLI
         run: |
-          curl -sS https://developer.salesforce.com/media/salesforce-cli/sf/channels/stable/sf-linux-x64.tar.xz -o sf.tar.xz
-          mkdir -p /usr/local/sf && tar -xf sf.tar.xz -C /usr/local/sf --strip-components=1
-          ln -s /usr/local/sf/sf /usr/local/bin/sf
-          rm sf.tar.xz
+          npm install --global @salesforce/cli
 
       - name: Install Python dependencies
         run: |
@@ -40,22 +37,20 @@ jobs:
 
       - name: Authenticate to Salesforce
         run: |
-          echo "${{ secrets.SFDX_AUTH_URL }}" > sfdx_auth.url
-          sf org login sfdx-url --sfdx-url-file sfdx_auth.url --alias "AutomatedOrg"
-        env:
-          SFDX_AUTH_URL: ${{ secrets.SFDX_AUTH_URL }}
+          echo ${{ secrets.SFDX_AUTH_URL }} | sf org login sfdx-url --set-default-dev-hub
 
       - name: Run Schema Pipeline
         run: |
           python src/pipeline/build_schema_library_end_to_end.py \
-            --org-alias "AutomatedOrg" \
+            --org-alias ${{ secrets.SF_ORG_ALIAS }} \
             --output ./output \
-            --with-stats \
-            --with-automation \
             --with-metadata \
+            --emit-markdown \
             --emit-jsonl \
             --push-to-pinecone \
-            --pinecone-index "${{ secrets.PINECONE_INDEX_NAME || 'salesforce-schema' }}"
+            --resume \
+            --stats-resume \
+            --max-workers 15
         env:
           PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
