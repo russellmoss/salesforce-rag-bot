@@ -42,10 +42,20 @@ class RAGService:
                 logger.warning(f"Index {config.PINECONE_INDEX_NAME} not found. Please ensure the pipeline has been run.")
                 return
             
+            # Create embedding function for querying
+            from openai import OpenAI
+            from langchain_openai import OpenAIEmbeddings
+            
+            # Initialize OpenAI embeddings
+            embedding_function = OpenAIEmbeddings(
+                model="text-embedding-3-small",
+                openai_api_key=config.OPENAI_API_KEY
+            )
+            
             # Initialize vector store
             self.vector_store = PineconeVectorStore(
                 index_name=config.PINECONE_INDEX_NAME,
-                embedding=None  # We'll use the existing embeddings
+                embedding=embedding_function
             )
             logger.info(f"Connected to Pinecone index: {config.PINECONE_INDEX_NAME}")
             
