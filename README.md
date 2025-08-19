@@ -376,9 +376,29 @@ To run manually:
 
 ## 🐳 Docker Installation (Alternative)
 
-## 📁 What Gets Created?
+If you prefer Docker for local deployment:
 
-After running the pipeline, you'll have:
+```bash
+# Build the image
+docker build -t salesforce-rag-bot .
+
+# Run the pipeline
+docker run -v $(pwd)/output:/app/output \
+  -e PINECONE_API_KEY=$PINECONE_API_KEY \
+  -e OPENAI_API_KEY=$OPENAI_API_KEY \
+  salesforce-rag-bot \
+  --org-alias MyOrg
+
+# Run the chatbot
+docker run -p 8501:8501 \
+  -e PINECONE_API_KEY=$PINECONE_API_KEY \
+  -e OPENAI_API_KEY=$OPENAI_API_KEY \
+  salesforce-rag-bot-chatbot
+```
+
+## 📁 What Gets Created? (Local Deployment)
+
+After running the pipeline locally, you'll have:
 
 ```
 output/
