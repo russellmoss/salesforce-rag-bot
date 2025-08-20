@@ -85,7 +85,7 @@ jobs:
 
       - name: Authenticate to Salesforce
         run: |
-          echo ${{ secrets.SFDX_AUTH_URL }} | sf org login sfdx-url --set-default --alias ${{ env.ORG_ALIAS }}
+          echo "${{ secrets.SFDX_AUTH_URL }}" | sf org login sfdx-url --sfdx-url-stdin --set-default --alias ${{ env.ORG_ALIAS }}
 
       - name: Run Initial Setup (Phase 1)
         env:
@@ -139,7 +139,7 @@ jobs:
 
       - name: Authenticate to Salesforce
         run: |
-          echo ${{ secrets.SFDX_AUTH_URL }} | sf org login sfdx-url --set-default --alias ${{ env.ORG_ALIAS }}
+          echo "${{ secrets.SFDX_AUTH_URL }}" | sf org login sfdx-url --sfdx-url-stdin --set-default --alias ${{ env.ORG_ALIAS }}
 
       - name: Clear cache if force restart
         if: env.FORCE_RESTART == 'true'
@@ -223,7 +223,7 @@ jobs:
 
       - name: Authenticate to Salesforce
         run: |
-          echo ${{ secrets.SFDX_AUTH_URL }} | sf org login sfdx-url --set-default --alias ${{ env.ORG_ALIAS }}
+          echo "${{ secrets.SFDX_AUTH_URL }}" | sf org login sfdx-url --sfdx-url-stdin --set-default --alias ${{ env.ORG_ALIAS }}
 
       - name: Push Complete Security Data to Pinecone
         env:
