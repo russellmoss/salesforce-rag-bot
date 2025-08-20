@@ -484,6 +484,95 @@ To run manually:
 2. Click "Salesforce Schema Pipeline"
 3. Click "Run workflow"
 
+## 📧 Email Alerts & Monitoring
+
+Get notified automatically when your daily schema updates succeed, fail, or have issues!
+
+### 🚀 Quick Setup (Choose One Option)
+
+#### Option A: GitHub Built-in Notifications (Easiest - 2 minutes)
+1. **Go to GitHub Settings** → Notifications
+2. **Enable email notifications** for Actions (workflow runs)
+3. **Set frequency** to "Immediate"
+4. **Done!** You'll get emails for all workflow events
+
+#### Option B: Custom Email Alerts (Advanced)
+Set up detailed email notifications with custom SMTP:
+
+1. **Add these GitHub Secrets**:
+   ```
+   SMTP_SERVER=smtp.gmail.com
+   SMTP_PORT=587
+   SMTP_USERNAME=your-email@gmail.com
+   SMTP_PASSWORD=your-app-password
+   SMTP_FROM=your-email@gmail.com
+   NOTIFICATION_EMAIL=admin@yourcompany.com
+   ```
+
+2. **For Gmail users**: Use App Password (not regular password)
+   - Go to Google Account → Security → 2-Step Verification → App passwords
+   - Generate password for "Mail"
+
+3. **Test**: Run workflow manually and check for email
+
+### 📧 What You'll Receive
+
+#### ✅ Success Email
+```
+🎉 Salesforce Schema Update Completed Successfully!
+📊 Objects Processed: 247
+✅ Your AI assistant is now updated!
+```
+
+#### ⚠️ Warning Email
+```
+⚠️ Salesforce Schema Update Completed with Warnings
+📊 Objects Processed: 245
+⚠️ Some warnings detected - review logs for details
+```
+
+#### ❌ Failure Email
+```
+❌ Salesforce Schema Update Failed!
+🚨 Exit Code: 1, Objects Processed: 23
+🔍 Check GitHub Actions logs for details
+```
+
+### 🔔 Alternative Notification Methods
+
+- **📱 GitHub Mobile App**: Push notifications on your phone
+- **🌐 Browser Notifications**: Real-time alerts when at computer
+- **💬 Slack Integration**: Team channel notifications
+- **📊 Status Badge**: Visual indicator in README
+
+### 📋 Status Badge (Visual Monitoring)
+
+Add this to your README.md for at-a-glance status:
+```markdown
+![Pipeline Status](https://github.com/YOUR-USERNAME/salesforce-rag-bot/workflows/Daily%20Salesforce%20Schema%20Update/badge.svg)
+```
+
+**Badge Colors:**
+- 🟢 Green = Success
+- 🔴 Red = Failed  
+- 🟡 Yellow = Running
+
+### 🛠️ Troubleshooting Alerts
+
+**"No emails received":**
+- Check spam/junk folder
+- Verify notification settings
+- Test with manual workflow run
+
+**"SMTP authentication failed":**
+- Use App Password for Gmail (not regular password)
+- Check SMTP server and port settings
+- Verify credentials are correct
+
+**For detailed setup instructions**, see:
+- [`EMAIL_ALERTS_SETUP.md`](EMAIL_ALERTS_SETUP.md) - Complete email configuration guide
+- [`SIMPLE_ALERTS_SETUP.md`](SIMPLE_ALERTS_SETUP.md) - 8 simple notification options
+
 ## 🐳 Docker Installation (Alternative)
 
 If you prefer Docker for local deployment:
