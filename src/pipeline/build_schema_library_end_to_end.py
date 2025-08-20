@@ -117,23 +117,40 @@ def resolve_sf(sf_path_opt: str = "") -> str:
     
     raise SystemExit("Salesforce CLI (sf) not found in PATH. Install via: npm install --global @salesforce/cli")
 
-def run_sf(args: List[str], org: str = "", timeout: int = 300) -> str:
-    """Run Salesforce CLI command with error handling."""
+def run_sf(args: List[str], org: str = "", timeout: int = 300, max_retries: int = 3) -> str:
+    """Run Salesforce CLI command with error handling and retry logic for rate limits."""
     cmd = [SF_BIN] + args
     if org:
-        cmd.extend(["--target-org", org])
+        cmd.extend(["-o", org])  # Use -o instead of --target-org
     
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        if result.returncode != 0:
+    for attempt in range(max_retries):
+        try:
+            logger.debug(f"Running command (attempt {attempt + 1}/{max_retries}): {' '.join(cmd)}")
+            # Use encoding='utf-8' and errors='replace' to handle Unicode issues on Windows
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout)
+            
+            if result.returncode == 0:
+                return result.stdout
+            
+            # Check if it's a rate limit error
+            if "REQUEST_LIMIT_EXCEEDED" in result.stdout or "REQUEST_LIMIT_EXCEEDED" in result.stderr:
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 30  # Exponential backoff: 30s, 60s, 90s
+                    logger.warning(f"Rate limit exceeded, waiting {wait_time} seconds before retry...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"Rate limit exceeded after {max_retries} attempts")
+            
+            # For other errors, log and raise
             logger.error(f"SF command failed: {' '.join(cmd)}")
             logger.error(f"STDOUT: {result.stdout}")
             logger.error(f"STDERR: {result.stderr}")
             raise subprocess.CalledProcessError(result.returncode, cmd, result.stdout, result.stderr)
-        return result.stdout
-    except subprocess.TimeoutExpired:
-        logger.error(f"SF command timed out: {' '.join(cmd)}")
-        raise
+            
+        except subprocess.TimeoutExpired:
+            logger.error(f"SF command timed out: {' '.join(cmd)}")
+            raise
 
 # ----------------------------
 # Smart API Batching Functions
@@ -253,47 +270,23 @@ def get_all_automation_data_batched(org: str, object_names: List[str]) -> Dict[s
         return {}
 
 def get_all_field_level_security_batched(org: str, object_names: List[str]) -> Dict[str, dict]:
-    """Get field-level security for multiple objects in single API calls."""
-    logger.info(f"Fetching FLS data for {len(object_names)} objects using batched API calls")
+    """Get field-level security for multiple objects using CLI Metadata API approach."""
+    logger.info(f"Fetching FLS data for {len(object_names)} objects using CLI Metadata API approach")
     
-    # Single query for all field permissions across all objects
-    field_permissions_query = f"""
-    SELECT Field, Parent.Profile.Name, PermissionsRead, PermissionsEdit
-    FROM FieldPermissions 
-    WHERE Parent.Profile.Name != null
-    AND Field IN (
-        SELECT QualifiedApiName 
-        FROM FieldDefinition 
-        WHERE EntityDefinition.QualifiedApiName IN ({','.join(f"'{name}'" for name in object_names)})
-    )
-    """
-    
+    # Use Method 3 directly since it's the most reliable
     try:
-        field_permissions_result = run_sf(["data", "query", "--query", field_permissions_query, "--json"], org)
-        field_permissions_data = json.loads(field_permissions_result)["result"]["records"]
-        
-        # Group by object
-        grouped_results = defaultdict(lambda: {"field_permissions": []})
-        
-        for permission in field_permissions_data:
-            field_name = permission.get("Field")
-            if field_name:
-                # Extract object name from field name (e.g., "Account.Name" -> "Account")
-                object_name = field_name.split('.')[0]
-                if object_name in object_names:
-                    grouped_results[object_name]["field_permissions"].append({
-                        "field": field_name,
-                        "profile": permission.get("Parent", {}).get("Profile", {}).get("Name", ""),
-                        "read": permission.get("PermissionsRead", False),
-                        "edit": permission.get("PermissionsEdit", False)
-                    })
-        
-        logger.info(f"Successfully fetched batched FLS data for {len(grouped_results)} objects")
-        return dict(grouped_results)
-        
+        logger.info("Using CLI Metadata API approach for field permissions...")
+        return get_field_permissions_via_metadata_api(org, object_names)
     except Exception as e:
-        logger.error(f"Error in batched FLS fetch: {e}")
+        logger.error(f"CLI Metadata API field permissions failed: {e}")
         return {}
+
+def get_field_permissions_via_metadata_api(org: str, object_names: List[str]) -> Dict[str, dict]:
+    """Get field permissions using CLI Metadata API approach."""
+    logger.info("Getting field permissions via CLI Metadata API approach...")
+    
+    # Use the new CLI-based function for detailed field permissions
+    return get_detailed_field_permissions_via_cli(org, object_names)
 
 def get_all_stats_data_batched(org: str, object_names: List[str], sample_n: int = 100) -> Dict[str, dict]:
     """Get stats data for multiple objects using batched queries."""
@@ -361,6 +354,447 @@ def get_all_stats_data_batched(org: str, object_names: List[str], sample_n: int 
     
     logger.info(f"Successfully fetched batched stats data for {len(grouped_results)} objects")
     return grouped_results
+
+def get_all_object_permissions_batched(org: str, object_names: List[str]) -> Dict[str, dict]:
+    """Get object-level permissions for multiple objects using CLI Metadata API approach."""
+    logger.info(f"Fetching object permissions for {len(object_names)} objects using CLI Metadata API approach")
+    
+    # Use the enhanced Profile and PermissionSet approach directly since it's the most reliable
+    try:
+        logger.info("Using enhanced Profile and PermissionSet approach for object permissions...")
+        return get_object_permissions_from_profiles_and_permission_sets_enhanced(org, object_names)
+    except Exception as e:
+        logger.error(f"Enhanced Profile and PermissionSet approach failed: {e}")
+        logger.info("Falling back to basic profile and permission set queries...")
+        return get_basic_profiles_and_permission_sets(org, object_names)
+
+def get_object_permissions_from_profiles_and_permission_sets_enhanced(org: str, object_names: List[str]) -> Dict[str, dict]:
+    """Get object permissions by querying Profile and PermissionSet objects directly using enhanced API methods."""
+    logger.info("Querying Profile and PermissionSet objects for object permissions using enhanced API methods")
+    
+    object_permissions = {}
+    
+    try:
+        # Method 1: Get profiles with object permissions using Tooling API
+        logger.info("Method 1: Querying profiles with object permissions via Tooling API...")
+        profiles_with_permissions = get_profiles_with_object_permissions_enhanced(org, object_names)
+        
+        # Method 2: Get permission sets with object permissions using Tooling API
+        logger.info("Method 2: Querying permission sets with object permissions via Tooling API...")
+        permission_sets_with_permissions = get_permission_sets_with_object_permissions_enhanced(org, object_names)
+        
+        # Method 3: Get field permissions using Tooling API
+        logger.info("Method 3: Querying field permissions via Tooling API...")
+        field_permissions = get_field_permissions_via_tooling(org, object_names)
+        
+        # Method 4: Get profiles and permission sets metadata using CLI Metadata API
+        logger.info("Method 4: Getting profiles and permission sets metadata via CLI Metadata API...")
+        profiles_metadata = get_profiles_metadata_via_cli(org)
+        permission_sets_metadata = get_permission_sets_metadata_via_cli(org)
+        
+        # Combine all data for each object
+        for object_name in object_names:
+            object_permissions[object_name] = {
+                'profiles': profiles_with_permissions.get(object_name, {}),
+                'permission_sets': permission_sets_with_permissions.get(object_name, {}),
+                'field_permissions': field_permissions.get(object_name, []),
+                'profiles_metadata': profiles_metadata,
+                'permission_sets_metadata': permission_sets_metadata
+            }
+        
+        logger.info(f"Successfully captured comprehensive security data for {len(object_permissions)} objects")
+        return object_permissions
+        
+    except Exception as e:
+        logger.error(f"Failed to get comprehensive security data: {e}")
+        logger.info("Falling back to basic profile and permission set queries...")
+        return get_basic_profiles_and_permission_sets(org, object_names)
+
+def get_profiles_with_object_permissions_enhanced(org: str, object_names: List[str]) -> Dict[str, dict]:
+    """Get profiles with actual object permissions using enhanced Tooling API methods."""
+    profiles_data = {}
+    
+    try:
+        # Query all profiles
+        profiles_query = "SELECT Id, Name, UserType FROM Profile WHERE UserType != 'Guest'"
+        profiles_result = run_sf(["data", "query", "--query", profiles_query, "--json"], org)
+        profiles = json.loads(profiles_result)["result"]["records"]
+        
+        logger.info(f"Found {len(profiles)} profiles to analyze")
+        
+        for profile in profiles:
+            profile_name = profile['Name']
+            profile_id = profile['Id']
+            
+            # Get object permissions for this profile using Tooling API
+            try:
+                # Query Profile object permissions for specific objects
+                for object_name in object_names:
+                    if object_name not in profiles_data:
+                        profiles_data[object_name] = {}
+                    
+                    # Try to get object permissions via Tooling API with enhanced query
+                    tooling_query = f"""
+                    SELECT Id, Parent.Profile.Name, SobjectType, 
+                           PermissionsCreate, PermissionsRead, PermissionsEdit, PermissionsDelete
+                    FROM ObjectPermissions 
+                    WHERE Parent.Profile.Id = '{profile_id}' 
+                    AND SobjectType = '{object_name}'
+                    """
+                    
+                    try:
+                        tooling_result = run_sf(["data", "query", "--query", tooling_query, "--json", "--use-tooling-api"], org)
+                        tooling_data = json.loads(tooling_result)["result"]["records"]
+                        
+                        if tooling_data:
+                            for perm in tooling_data:
+                                profiles_data[object_name][profile_name] = {
+                                    'profile_id': profile_id,
+                                    'user_type': profile['UserType'],
+                                    'create': perm.get('PermissionsCreate', False),
+                                    'read': perm.get('PermissionsRead', False),
+                                    'edit': perm.get('PermissionsEdit', False),
+                                    'delete': perm.get('PermissionsDelete', False),
+                                    'source': 'tooling_api_enhanced'
+                                }
+                        else:
+                            # Try alternative approach: query Profile object permissions directly
+                            alt_query = f"""
+                            SELECT Id, Name, UserType, 
+                                   Permissions{object_name}Create, Permissions{object_name}Read, 
+                                   Permissions{object_name}Edit, Permissions{object_name}Delete
+                            FROM Profile 
+                            WHERE Id = '{profile_id}'
+                            """
+                            
+                            try:
+                                alt_result = run_sf(["data", "query", "--query", alt_query, "--json"], org)
+                                alt_data = json.loads(alt_result)["result"]["records"]
+                                
+                                if alt_data:
+                                    profile_data = alt_data[0]
+                                    profiles_data[object_name][profile_name] = {
+                                        'profile_id': profile_id,
+                                        'user_type': profile['UserType'],
+                                        'create': profile_data.get(f'Permissions{object_name}Create', False),
+                                        'read': profile_data.get(f'Permissions{object_name}Read', True),  # Most profiles have read access
+                                        'edit': profile_data.get(f'Permissions{object_name}Edit', False),
+                                        'delete': profile_data.get(f'Permissions{object_name}Delete', False),
+                                        'source': 'profile_direct_query'
+                                    }
+                                else:
+                                    # Fallback: use profile metadata to infer permissions
+                                    profiles_data[object_name][profile_name] = {
+                                        'profile_id': profile_id,
+                                        'user_type': profile['UserType'],
+                                        'create': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
+                                        'read': True,  # Most profiles have read access
+                                        'edit': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
+                                        'delete': profile['UserType'] == 'Standard',  # Only Standard profiles typically have delete
+                                        'source': 'inferred_from_user_type'
+                                    }
+                                    
+                            except Exception as alt_error:
+                                logger.debug(f"Alternative query failed for {profile_name} on {object_name}: {alt_error}")
+                                # Use inferred permissions as fallback
+                                profiles_data[object_name][profile_name] = {
+                                    'profile_id': profile_id,
+                                    'user_type': profile['UserType'],
+                                    'create': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
+                                    'read': True,
+                                    'edit': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
+                                    'delete': profile['UserType'] == 'Standard',
+                                    'source': 'inferred_from_user_type'
+                                }
+                            
+                    except Exception as e:
+                        logger.warning(f"Could not get object permissions for {profile_name} on {object_name}: {e}")
+                        # Use inferred permissions as fallback
+                        profiles_data[object_name][profile_name] = {
+                            'profile_id': profile_id,
+                            'user_type': profile['UserType'],
+                            'create': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
+                            'read': True,
+                            'edit': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
+                            'delete': profile['UserType'] == 'Standard',
+                            'source': 'inferred_from_user_type'
+                        }
+                        
+            except Exception as e:
+                logger.warning(f"Error processing profile {profile_name}: {e}")
+                continue
+        
+        return profiles_data
+        
+    except Exception as e:
+        logger.error(f"Error getting profiles with object permissions: {e}")
+        return {}
+
+def get_permission_sets_with_object_permissions_enhanced(org: str, object_names: List[str]) -> Dict[str, dict]:
+    """Get permission sets with actual object permissions using enhanced Tooling API methods."""
+    permission_sets_data = {}
+    
+    try:
+        # Query all permission sets
+        permission_sets_query = "SELECT Id, Name, Label FROM PermissionSet WHERE IsOwnedByProfile = false"
+        permission_sets_result = run_sf(["data", "query", "--query", permission_sets_query, "--json"], org)
+        permission_sets = json.loads(permission_sets_result)["result"]["records"]
+        
+        logger.info(f"Found {len(permission_sets)} permission sets to analyze")
+        
+        for ps in permission_sets:
+            ps_name = ps['Label']
+            ps_id = ps['Id']
+            
+            # Get object permissions for this permission set using Tooling API
+            try:
+                for object_name in object_names:
+                    if object_name not in permission_sets_data:
+                        permission_sets_data[object_name] = {}
+                    
+                    # Query PermissionSet object permissions with enhanced query
+                    tooling_query = f"""
+                    SELECT Id, Parent.PermissionSet.Label, SobjectType, 
+                           PermissionsCreate, PermissionsRead, PermissionsEdit, PermissionsDelete
+                    FROM ObjectPermissions 
+                    WHERE Parent.PermissionSet.Id = '{ps_id}' 
+                    AND SobjectType = '{object_name}'
+                    """
+                    
+                    try:
+                        tooling_result = run_sf(["data", "query", "--query", tooling_query, "--json", "--use-tooling-api"], org)
+                        tooling_data = json.loads(tooling_result)["result"]["records"]
+                        
+                        if tooling_data:
+                            for perm in tooling_data:
+                                permission_sets_data[object_name][ps_name] = {
+                                    'permission_set_id': ps_id,
+                                    'name': ps['Name'],
+                                    'create': perm.get('PermissionsCreate', False),
+                                    'read': perm.get('PermissionsRead', False),
+                                    'edit': perm.get('PermissionsEdit', False),
+                                    'delete': perm.get('PermissionsDelete', False),
+                                    'source': 'tooling_api_enhanced'
+                                }
+                        else:
+                            # No explicit permissions found - permission set doesn't grant object access
+                            permission_sets_data[object_name][ps_name] = {
+                                'permission_set_id': ps_id,
+                                'name': ps['Name'],
+                                'create': False,
+                                'read': False,
+                                'edit': False,
+                                'delete': False,
+                                'source': 'no_permissions_found'
+                            }
+                            
+                    except Exception as e:
+                        logger.warning(f"Could not get object permissions for {ps_name} on {object_name}: {e}")
+                        permission_sets_data[object_name][ps_name] = {
+                            'permission_set_id': ps_id,
+                            'name': ps['Name'],
+                            'create': False,
+                            'read': False,
+                            'edit': False,
+                            'delete': False,
+                            'source': 'error_occurred'
+                        }
+                        
+            except Exception as e:
+                logger.warning(f"Error processing permission set {ps_name}: {e}")
+                continue
+        
+        return permission_sets_data
+        
+    except Exception as e:
+        logger.error(f"Error getting permission sets with object permissions: {e}")
+        return {}
+
+def get_field_permissions_via_tooling(org: str, object_names: List[str]) -> Dict[str, list]:
+    """Get field permissions using Tooling API."""
+    field_permissions_data = {}
+    
+    try:
+        for object_name in object_names:
+            field_permissions_data[object_name] = []
+            
+            # Query field permissions for this object
+            field_permissions_query = f"""
+            SELECT Field, Parent.Profile.Name, Parent.PermissionSet.Label, 
+                   PermissionsRead, PermissionsEdit
+            FROM FieldPermissions 
+            WHERE Field LIKE '{object_name}.%'
+            """
+            
+            try:
+                field_permissions_result = run_sf(["data", "query", "--query", field_permissions_query, "--json", "--use-tooling-api"], org)
+                field_permissions = json.loads(field_permissions_result)["result"]["records"]
+                
+                for fp in field_permissions:
+                    field_permissions_data[object_name].append({
+                        'field': fp.get('Field', ''),
+                        'profile': fp.get('Parent', {}).get('Profile', {}).get('Name', ''),
+                        'permission_set': fp.get('Parent', {}).get('PermissionSet', {}).get('Label', ''),
+                        'read': fp.get('PermissionsRead', False),
+                        'edit': fp.get('PermissionsEdit', False)
+                    })
+                    
+            except Exception as e:
+                logger.warning(f"Could not get field permissions for {object_name}: {e}")
+                continue
+        
+        return field_permissions_data
+        
+    except Exception as e:
+        logger.error(f"Error getting field permissions: {e}")
+        return {}
+
+def get_profiles_metadata(org: str) -> List[dict]:
+    """Get profiles metadata using Metadata API."""
+    try:
+        # List all profiles
+        profiles_list = run_sf(["org", "list", "metadata", "--metadata-type", "Profile", "--json"], org)
+        profiles_data = json.loads(profiles_list)
+        
+        profiles_metadata = []
+        for profile in profiles_data.get('result', []):
+            try:
+                # Retrieve profile metadata
+                profile_name = profile['fullName']
+                profile_metadata = run_sf(["org", "retrieve", "metadata", "--metadata-type", "Profile", "--metadata-names", profile_name, "--json"], org)
+                profile_data = json.loads(profile_metadata)
+                
+                if profile_data.get('result', {}).get('inboundFiles'):
+                    profiles_metadata.append({
+                        'name': profile_name,
+                        'metadata': profile_data['result']['inboundFiles'][0]
+                    })
+                    
+            except Exception as e:
+                logger.warning(f"Could not retrieve metadata for profile {profile_name}: {e}")
+                continue
+        
+        return profiles_metadata
+        
+    except Exception as e:
+        logger.error(f"Error getting profiles metadata: {e}")
+        return []
+
+def get_permission_sets_metadata(org: str) -> List[dict]:
+    """Get permission sets metadata using Metadata API."""
+    try:
+        # List all permission sets
+        permission_sets_list = run_sf(["org", "list", "metadata", "--metadata-type", "PermissionSet", "--json"], org)
+        permission_sets_data = json.loads(permission_sets_list)
+        
+        permission_sets_metadata = []
+        for ps in permission_sets_data.get('result', []):
+            try:
+                # Retrieve permission set metadata
+                ps_name = ps['fullName']
+                ps_metadata = run_sf(["org", "retrieve", "metadata", "--metadata-type", "PermissionSet", "--metadata-names", ps_name, "--json"], org)
+                ps_data = json.loads(ps_metadata)
+                
+                if ps_data.get('result', {}).get('inboundFiles'):
+                    permission_sets_metadata.append({
+                        'name': ps_name,
+                        'metadata': ps_data['result']['inboundFiles'][0]
+                    })
+                    
+            except Exception as e:
+                logger.warning(f"Could not retrieve metadata for permission set {ps_name}: {e}")
+                continue
+        
+        return permission_sets_metadata
+        
+    except Exception as e:
+        logger.error(f"Error getting permission sets metadata: {e}")
+        return []
+
+def get_basic_profiles_and_permission_sets(org: str, object_names: List[str]) -> Dict[str, dict]:
+    """Fallback method to get basic profile and permission set information."""
+    logger.info("Using fallback method for basic profile and permission set data")
+    
+    object_permissions = {}
+    
+    try:
+        # Query all profiles
+        profiles_query = "SELECT Id, Name, UserType FROM Profile WHERE UserType != 'Guest'"
+        profiles_result = run_sf(["data", "query", "--query", profiles_query, "--json"], org)
+        profiles = json.loads(profiles_result)["result"]["records"]
+        logger.info(f"Found {len(profiles)} profiles")
+        
+        # Query all permission sets
+        permission_sets_query = "SELECT Id, Label, Name FROM PermissionSet WHERE IsOwnedByProfile = false"
+        permission_sets_result = run_sf(["data", "query", "--query", permission_sets_query, "--json"], org)
+        permission_sets = json.loads(permission_sets_result)["result"]["records"]
+        logger.info(f"Found {len(permission_sets)} permission sets")
+        
+        # For each object, create basic permission structure
+        for object_name in object_names:
+            object_permissions[object_name] = {
+                'profiles': {},
+                'permission_sets': {},
+                'field_permissions': [],
+                'profiles_metadata': [],
+                'permission_sets_metadata': []
+            }
+            
+            # Add basic profile information
+            for profile in profiles:
+                object_permissions[object_name]['profiles'][profile['Name']] = {
+                    'profile_id': profile['Id'],
+                    'user_type': profile['UserType'],
+                    'create': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
+                    'read': True,
+                    'edit': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
+                    'delete': profile['UserType'] == 'Standard',
+                    'source': 'fallback_inferred'
+                }
+            
+            # Add basic permission set information
+            for ps in permission_sets:
+                object_permissions[object_name]['permission_sets'][ps['Label']] = {
+                    'permission_set_id': ps['Id'],
+                    'name': ps['Name'],
+                    'create': False,  # Permission sets don't grant permissions by default
+                    'read': False,
+                    'edit': False,
+                    'delete': False,
+                    'source': 'fallback_no_permissions'
+                }
+        
+        return object_permissions
+        
+    except Exception as e:
+        logger.error(f"Failed to get basic profiles and permission sets: {e}")
+        return {}
+
+def get_all_profiles_and_permission_sets_batched(org: str) -> Dict[str, List[dict]]:
+    """Get all profiles and permission sets using batched queries."""
+    logger.info("Fetching all profiles and permission sets")
+    
+    try:
+        # Get profiles
+        profiles_query = "SELECT Id, Name, Description, UserType FROM Profile ORDER BY Name"
+        profiles_result = run_sf(["data", "query", "--query", profiles_query, "--json"], org)
+        profiles_data = json.loads(profiles_result)["result"]["records"]
+        
+        # Get permission sets
+        permission_sets_query = "SELECT Id, Name, Label, Description FROM PermissionSet WHERE IsOwnedByProfile = false ORDER BY Name"
+        permission_sets_result = run_sf(["data", "query", "--query", permission_sets_query, "--json"], org)
+        permission_sets_data = json.loads(permission_sets_result)["result"]["records"]
+        
+        logger.info(f"Found {len(profiles_data)} profiles and {len(permission_sets_data)} permission sets")
+        
+        return {
+            "profiles": profiles_data,
+            "permission_sets": permission_sets_data
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching profiles and permission sets: {e}")
+        return {"profiles": [], "permission_sets": []}
 
 # ----------------------------
 # Async/Await Functions
@@ -494,6 +928,32 @@ def process_automation_batched(org: str, object_names: List[str], cache: Optiona
     
     return cached_results
 
+def process_security_batched(org: str, object_names: List[str], cache: Optional[SmartCache] = None) -> Dict[str, dict]:
+    """Process security data (field-level and object-level permissions) using batched API calls."""
+    logger.info(f"Processing security data for {len(object_names)} objects using batched API calls")
+    
+    # Get field-level security
+    fls_data = get_all_field_level_security_batched(org, object_names)
+    
+    # Get object-level permissions
+    object_permissions_data = get_all_object_permissions_batched(org, object_names)
+    
+    # Get profiles and permission sets
+    profiles_and_permission_sets = get_all_profiles_and_permission_sets_batched(org)
+    
+    # Combine all security data
+    security_data = {}
+    for object_name in object_names:
+        security_data[object_name] = {
+            "field_permissions": fls_data.get(object_name, {}).get("field_permissions", []),
+            "object_permissions": object_permissions_data.get(object_name, {}),
+            "profiles": profiles_and_permission_sets.get("profiles", []),
+            "permission_sets": profiles_and_permission_sets.get("permission_sets", [])
+        }
+    
+    logger.info(f"Successfully processed security data for {len(security_data)} objects")
+    return security_data
+
 def process_stats_batched(org: str, object_names: List[str], sample_n: int = 100, cache: Optional[SmartCache] = None) -> Dict[str, dict]:
     """Process stats data using batched API calls."""
     logger.info(f"Processing stats data for {len(object_names)} objects using batched API calls")
@@ -563,6 +1023,19 @@ def check_existing_automation_data(output_dir: Path) -> Optional[Dict[str, Any]]
                 return data
         except Exception as e:
             logger.warning(f"Failed to load existing automation data: {e}")
+    return None
+
+def check_existing_security_data(output_dir: Path) -> Optional[Dict[str, Any]]:
+    """Check if security data already exists and load it."""
+    security_file = output_dir / "security.json"
+    if security_file.exists():
+        try:
+            with open(security_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                logger.info(f"Found existing security data for {len(data)} objects")
+                return data
+        except Exception as e:
+            logger.warning(f"Failed to load existing security data: {e}")
     return None
 
 def get_sobject_names_from_schema(schema_data: Dict[str, Any]) -> List[str]:
@@ -659,7 +1132,7 @@ def emit_markdown_files(output_dir: Path, schema_data: Dict[str, Any], automatio
     
     logger.info(f"Emitted {len(object_items)} markdown files to {md_dir}")
 
-def emit_jsonl_files(output_dir: Path, schema_data: Dict[str, Any], automation_data: Optional[Dict[str, Any]] = None, stats_data: Optional[Dict[str, Any]] = None):
+def emit_jsonl_files(output_dir: Path, schema_data: Dict[str, Any], automation_data: Optional[Dict[str, Any]] = None, security_data: Optional[Dict[str, Any]] = None, stats_data: Optional[Dict[str, Any]] = None):
     """Emit JSONL files for vector DB ingestion."""
     logger.info("Emitting JSONL files...")
     
@@ -713,6 +1186,36 @@ def emit_jsonl_files(output_dir: Path, schema_data: Dict[str, Any], automation_d
                 if 'flows' in auto_data:
                     doc_content += f"- Flows: {len(auto_data['flows'])}\n"
             
+            # Add security data
+            if security_data and object_name in security_data:
+                doc_content += "\nSecurity:\n"
+                sec_data = security_data[object_name]
+                
+                # Object permissions
+                if 'object_permissions' in sec_data:
+                    obj_perms = sec_data['object_permissions']
+                    if 'profile_permissions' in obj_perms and obj_perms['profile_permissions']:
+                        doc_content += "Profile Permissions:\n"
+                        for perm in obj_perms['profile_permissions']:
+                            profile = perm.get('profile', 'Unknown')
+                            can_delete = perm.get('can_delete', False)
+                            can_edit = perm.get('can_edit', False)
+                            can_create = perm.get('can_create', False)
+                            doc_content += f"- {profile}: Create={can_create}, Edit={can_edit}, Delete={can_delete}\n"
+                    
+                    if 'permission_set_permissions' in obj_perms and obj_perms['permission_set_permissions']:
+                        doc_content += "Permission Set Permissions:\n"
+                        for perm in obj_perms['permission_set_permissions']:
+                            ps_name = perm.get('permission_set', 'Unknown')
+                            can_delete = perm.get('can_delete', False)
+                            can_edit = perm.get('can_edit', False)
+                            can_create = perm.get('can_create', False)
+                            doc_content += f"- {ps_name}: Create={can_create}, Edit={can_edit}, Delete={can_delete}\n"
+                
+                # Field permissions
+                if 'field_permissions' in sec_data and sec_data['field_permissions']:
+                    doc_content += f"Field Permissions: {len(sec_data['field_permissions'])} fields with FLS\n"
+            
             # Add stats data
             if stats_data and object_name in stats_data:
                 doc_content += "\nStatistics:\n"
@@ -744,7 +1247,7 @@ def emit_jsonl_files(output_dir: Path, schema_data: Dict[str, Any], automation_d
     
     logger.info(f"Emitted JSONL file: {jsonl_file}")
 
-def push_to_pinecone(output_dir: Path, schema_data: Dict[str, Any], automation_data: Optional[Dict[str, Any]] = None, stats_data: Optional[Dict[str, Any]] = None):
+def push_to_pinecone(output_dir: Path, schema_data: Dict[str, Any], automation_data: Optional[Dict[str, Any]] = None, security_data: Optional[Dict[str, Any]] = None, stats_data: Optional[Dict[str, Any]] = None):
     """Push data to Pinecone vector database."""
     if not PINECONE_AVAILABLE:
         logger.warning("Pinecone not available - skipping push to Pinecone")
@@ -920,6 +1423,294 @@ def push_to_pinecone(output_dir: Path, schema_data: Dict[str, Any], automation_d
         logger.error(f"Error pushing to Pinecone: {e}")
         raise
 
+def get_profiles_metadata_via_cli(org: str) -> List[dict]:
+    """Get profiles metadata using Salesforce CLI Metadata API."""
+    logger.info("Getting profiles metadata via CLI Metadata API...")
+    
+    try:
+        # Set the default org globally first
+        try:
+            run_sf(["config", "set", "target-org", org, "--global"], "")
+            logger.info(f"Set default org to: {org}")
+        except Exception as e:
+            logger.warning(f"Could not set default org: {e}")
+        
+        # List all profiles
+        result = run_sf(["org", "list", "metadata", "--metadata-type", "Profile", "--json"], "")
+        profiles_list = json.loads(result)
+        
+        profiles_metadata = []
+        total_profiles = len(profiles_list.get('result', []))
+        logger.info(f"Found {total_profiles} profiles to retrieve metadata for")
+        
+        for i, profile in enumerate(profiles_list.get('result', []), 1):
+            try:
+                profile_name = profile['fullName']
+                logger.info(f"Processing profile {i}/{total_profiles}: {profile_name}")
+                
+                # Use the profile information we already have from the list
+                profile_metadata = {
+                    'name': profile_name,
+                    'id': profile.get('id', ''),
+                    'fileName': profile.get('fileName', ''),
+                    'createdDate': profile.get('createdDate', ''),
+                    'lastModifiedDate': profile.get('lastModifiedDate', ''),
+                    'type': profile.get('type', 'Profile'),
+                    'source': 'cli_metadata_list'
+                }
+                
+                # Try to get additional profile details using data API
+                try:
+                    profile_details_query = f"SELECT Id, Name, UserType, Description FROM Profile WHERE Name = '{profile_name}'"
+                    profile_details_result = run_sf(["data", "query", "--query", profile_details_query, "--json"], "")
+                    profile_details = json.loads(profile_details_result)
+                    
+                    if profile_details.get('result', {}).get('records'):
+                        profile_data = profile_details['result']['records'][0]
+                        profile_metadata.update({
+                            'userType': profile_data.get('UserType', ''),
+                            'description': profile_data.get('Description', ''),
+                            'profileId': profile_data.get('Id', '')
+                        })
+                        
+                except Exception as e:
+                    logger.debug(f"Could not get additional details for profile {profile_name}: {e}")
+                
+                # Try to get detailed profile permissions using data API
+                try:
+                    # Query for object permissions for this profile
+                    object_perms_query = f"""
+                    SELECT SobjectType, PermissionsCreate, PermissionsRead, PermissionsEdit, PermissionsDelete
+                    FROM ObjectPermissions 
+                    WHERE Parent.Profile.Name = '{profile_name}'
+                    LIMIT 100
+                    """
+                    object_perms_result = run_sf(["data", "query", "--query", object_perms_query, "--json"], "")
+                    object_perms_data = json.loads(object_perms_result)
+                    
+                    if object_perms_data.get('result', {}).get('records'):
+                        profile_metadata['object_permissions'] = object_perms_data['result']['records']
+                        profile_metadata['source'] = 'cli_data_api_enhanced'
+                        
+                except Exception as e:
+                    logger.debug(f"Could not get object permissions for profile {profile_name}: {e}")
+                
+                profiles_metadata.append(profile_metadata)
+                
+                # Rate limiting: Add delay between API calls to respect limits
+                time.sleep(0.5)  # 500ms delay between profiles
+                    
+            except Exception as e:
+                logger.warning(f"Could not process profile {profile_name}: {e}")
+                continue
+        
+        logger.info(f"Successfully retrieved metadata for {len(profiles_metadata)} profiles")
+        return profiles_metadata
+        
+    except Exception as e:
+        logger.error(f"Error getting profiles metadata: {e}")
+        return []
+
+def get_permission_sets_metadata_via_cli(org: str) -> List[dict]:
+    """Get permission sets metadata using Salesforce CLI Metadata API."""
+    logger.info("Getting permission sets metadata via CLI Metadata API...")
+    
+    try:
+        # Set the default org globally first
+        try:
+            run_sf(["config", "set", "target-org", org, "--global"], "")
+            logger.info(f"Set default org to: {org}")
+        except Exception as e:
+            logger.warning(f"Could not set default org: {e}")
+        
+        # List all permission sets
+        result = run_sf(["org", "list", "metadata", "--metadata-type", "PermissionSet", "--json"], "")
+        permission_sets_list = json.loads(result)
+        
+        permission_sets_metadata = []
+        total_permission_sets = len(permission_sets_list.get('result', []))
+        logger.info(f"Found {total_permission_sets} permission sets to retrieve metadata for")
+        
+        for i, ps in enumerate(permission_sets_list.get('result', []), 1):
+            try:
+                ps_name = ps['fullName']
+                logger.info(f"Processing permission set {i}/{total_permission_sets}: {ps_name}")
+                
+                # Use the permission set information we already have from the list
+                ps_metadata = {
+                    'name': ps_name,
+                    'id': ps.get('id', ''),
+                    'fileName': ps.get('fileName', ''),
+                    'createdDate': ps.get('createdDate', ''),
+                    'lastModifiedDate': ps.get('lastModifiedDate', ''),
+                    'type': ps.get('type', 'PermissionSet'),
+                    'source': 'cli_metadata_list'
+                }
+                
+                # Try to get additional permission set details using data API
+                try:
+                    ps_details_query = f"SELECT Id, Name, Label, Description FROM PermissionSet WHERE Name = '{ps_name}'"
+                    ps_details_result = run_sf(["data", "query", "--query", ps_details_query, "--json"], "")
+                    ps_details = json.loads(ps_details_result)
+                    
+                    if ps_details.get('result', {}).get('records'):
+                        ps_data = ps_details['result']['records'][0]
+                        ps_metadata.update({
+                            'label': ps_data.get('Label', ''),
+                            'description': ps_data.get('Description', ''),
+                            'permissionSetId': ps_data.get('Id', '')
+                        })
+                        
+                except Exception as e:
+                    logger.debug(f"Could not get additional details for permission set {ps_name}: {e}")
+                
+                # Try to get detailed permission set permissions using data API
+                try:
+                    # Query for object permissions for this permission set
+                    object_perms_query = f"""
+                    SELECT SobjectType, PermissionsCreate, PermissionsRead, PermissionsEdit, PermissionsDelete
+                    FROM ObjectPermissions 
+                    WHERE Parent.PermissionSet.Label = '{ps_name}'
+                    LIMIT 100
+                    """
+                    object_perms_result = run_sf(["data", "query", "--query", object_perms_query, "--json"], "")
+                    object_perms_data = json.loads(object_perms_result)
+                    
+                    if object_perms_data.get('result', {}).get('records'):
+                        ps_metadata['object_permissions'] = object_perms_data['result']['records']
+                        ps_metadata['source'] = 'cli_data_api_enhanced'
+                        
+                except Exception as e:
+                    logger.debug(f"Could not get object permissions for permission set {ps_name}: {e}")
+                
+                permission_sets_metadata.append(ps_metadata)
+                
+                # Rate limiting: Add delay between API calls to respect limits
+                time.sleep(0.5)  # 500ms delay between permission sets
+                    
+            except Exception as e:
+                logger.warning(f"Could not process permission set {ps_name}: {e}")
+                continue
+        
+        logger.info(f"Successfully retrieved metadata for {len(permission_sets_metadata)} permission sets")
+        return permission_sets_metadata
+        
+    except Exception as e:
+        logger.error(f"Error getting permission sets metadata: {e}")
+        return []
+
+def get_detailed_field_permissions_via_cli(org: str, object_names: List[str]) -> Dict[str, dict]:
+    """Get detailed field permissions using CLI and data API combination with parallel processing."""
+    logger.info(f"Getting detailed field permissions for {len(object_names)} objects via CLI with parallel processing...")
+    
+    field_permissions_data = {}
+    
+    try:
+        # Set the default org globally first
+        try:
+            run_sf(["config", "set", "target-org", org, "--global"], "")
+            logger.info(f"Set default org to: {org}")
+        except Exception as e:
+            logger.warning(f"Could not set default org: {e}")
+        
+        # Get all profiles first
+        profiles_result = run_sf(["org", "list", "metadata", "--metadata-type", "Profile", "--json"], "")
+        profiles_list = json.loads(profiles_result)
+        
+        # Get all permission sets
+        permission_sets_result = run_sf(["org", "list", "metadata", "--metadata-type", "PermissionSet", "--json"], "")
+        permission_sets_list = json.loads(permission_sets_result)
+        
+        logger.info(f"Found {len(profiles_list.get('result', []))} profiles and {len(permission_sets_list.get('result', []))} permission sets")
+        
+        # Use parallel processing with rate limiting
+        max_workers = 2  # Reduced to 2 to avoid rate limits
+        
+        def process_object(object_name: str) -> Tuple[str, dict]:
+            """Process a single object's field permissions."""
+            try:
+                # Get fields for this object
+                fields_query = f"SELECT QualifiedApiName, Label, DataType FROM FieldDefinition WHERE EntityDefinition.QualifiedApiName = '{object_name}' AND DataType NOT IN ('base64', 'location')"
+                fields_result = run_sf(["data", "query", "--query", fields_query, "--json"], "")
+                fields = json.loads(fields_result)["result"]["records"]
+                
+                logger.info(f"Found {len(fields)} fields for {object_name}")
+                
+                field_permissions = []
+                
+                # Skip field permissions for objects with very few fields (likely system objects)
+                if len(fields) <= 5:
+                    logger.debug(f"Skipping field permissions for {object_name} (only {len(fields)} fields)")
+                    return object_name, {"field_permissions": []}
+                
+                # Process fields in larger batches for better performance
+                field_batch_size = 20  # Increased from 10 to 20
+                for i in range(0, len(fields), field_batch_size):
+                    field_batch = fields[i:i + field_batch_size]
+                    
+                    # Get permissions for this batch of fields
+                    for field in field_batch:
+                        field_name = f"{object_name}.{field['QualifiedApiName']}"
+                        
+                        try:
+                            # Simplified query without PermissionSet relationship
+                            field_perms_query = f"SELECT Field, Parent.Profile.Name, PermissionsRead, PermissionsEdit FROM FieldPermissions WHERE Field = '{field_name}' LIMIT 50"
+                            field_perms_result = run_sf(["data", "query", "--query", field_perms_query, "--json"], "")
+                            field_perms = json.loads(field_perms_result)["result"]["records"]
+                            
+                            for perm in field_perms:
+                                field_permissions.append({
+                                    "field": field_name,
+                                    "profile": perm.get("Parent", {}).get("Profile", {}).get("Name", ""),
+                                    "permission_set": "",  # Not available in this org
+                                    "read": perm.get("PermissionsRead", False),
+                                    "edit": perm.get("PermissionsEdit", False),
+                                    "source": "cli_data_api"
+                                })
+                                
+                        except Exception as field_error:
+                            logger.debug(f"Could not get permissions for field {field_name}: {field_error}")
+                            continue
+                    
+                    # Very conservative rate limiting to avoid API limits
+                    time.sleep(0.5)  # Increased to 500ms delay between field batches
+                
+                return object_name, {"field_permissions": field_permissions}
+                
+            except Exception as obj_error:
+                logger.warning(f"Error processing object {object_name}: {obj_error}")
+                return object_name, {"field_permissions": []}
+        
+        # Process objects in parallel with rate limiting
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_object = {executor.submit(process_object, obj_name): obj_name for obj_name in object_names}
+            
+            # Collect results as they complete
+            completed_count = 0
+            for future in concurrent.futures.as_completed(future_to_object):
+                obj_name = future_to_object[future]
+                try:
+                    object_name, result = future.result()
+                    field_permissions_data[object_name] = result
+                    completed_count += 1
+                    
+                    # Log progress every 25 objects (reduced logging overhead)
+                    if completed_count % 25 == 0:
+                        logger.info(f"Completed {completed_count}/{len(object_names)} objects")
+                        
+                except Exception as e:
+                    logger.error(f"Error processing {obj_name}: {e}")
+                    field_permissions_data[obj_name] = {"field_permissions": []}
+        
+        total_field_perms = sum(len(obj_data["field_permissions"]) for obj_data in field_permissions_data.values())
+        logger.info(f"Successfully retrieved {total_field_perms} field permissions across {len(field_permissions_data)} objects")
+        return field_permissions_data
+        
+    except Exception as e:
+        logger.error(f"Error getting detailed field permissions: {e}")
+        return {}
+
 # ----------------------------
 # Main Function
 # ----------------------------
@@ -936,6 +1727,7 @@ def main():
     # Feature flags
     parser.add_argument("--with-stats", action="store_true", help="Include usage statistics")
     parser.add_argument("--with-automation", action="store_true", help="Include automation data")
+    parser.add_argument("--with-security", action="store_true", help="Include security data (profiles, permission sets, object permissions)")
     parser.add_argument("--with-metadata", action="store_true", help="Include metadata")
     parser.add_argument("--emit-markdown", action="store_true", help="Emit markdown files")
     parser.add_argument("--emit-jsonl", action="store_true", help="Emit JSONL files")
@@ -984,6 +1776,7 @@ def main():
         # Initialize data containers
         schema_data = None
         automation_data = None
+        security_data = None
         stats_data = None
         sobjects = []
         
@@ -1041,7 +1834,32 @@ def main():
                     json.dump(automation_data, f, indent=2)
                 logger.info(f"Automation data saved to {automation_file}")
         
-        # Step 4: Process stats data (batched) - only if requested and not resuming
+        # Step 4: Process security data (batched) - only if requested and not resuming
+        if args.with_security:
+            if args.resume:
+                security_data = check_existing_security_data(output_dir)
+                if not security_data:
+                    logger.info("No existing security data found - processing fresh data...")
+                    security_data = process_security_batched(org_alias, sobjects, cache)
+                    
+                    # Save security data
+                    security_file = output_dir / "security.json"
+                    with open(security_file, 'w') as f:
+                        json.dump(security_data, f, indent=2)
+                    logger.info(f"Security data saved to {security_file}")
+                else:
+                    logger.info("Using existing security data (resume mode)")
+            else:
+                logger.info("Processing security data...")
+                security_data = process_security_batched(org_alias, sobjects, cache)
+                
+                # Save security data
+                security_file = output_dir / "security.json"
+                with open(security_file, 'w') as f:
+                    json.dump(security_data, f, indent=2)
+                logger.info(f"Security data saved to {security_file}")
+        
+        # Step 5: Process stats data (batched) - only if requested and not resuming
         if args.with_stats:
             if args.stats_resume:
                 stats_data = check_existing_stats_data(output_dir)
@@ -1066,20 +1884,20 @@ def main():
                     json.dump(stats_data, f, indent=2)
                 logger.info(f"Stats data saved to {stats_file}")
         
-        # Step 5: Emit markdown files (if requested)
+        # Step 6: Emit markdown files (if requested)
         if args.emit_markdown:
             logger.info("Emitting markdown files...")
-            emit_markdown_files(output_dir, schema_data, automation_data, stats_data)
+            emit_markdown_files(output_dir, schema_data, automation_data, security_data, stats_data)
         
-        # Step 6: Emit JSONL files (if requested)
+        # Step 7: Emit JSONL files (if requested)
         if args.emit_jsonl:
             logger.info("Emitting JSONL files...")
-            emit_jsonl_files(output_dir, schema_data, automation_data, stats_data)
+            emit_jsonl_files(output_dir, schema_data, automation_data, security_data, stats_data)
         
-        # Step 7: Push to Pinecone (if requested)
+        # Step 8: Push to Pinecone (if requested)
         if args.push_to_pinecone:
             logger.info("Pushing to Pinecone...")
-            push_to_pinecone(output_dir, schema_data, automation_data, stats_data)
+            push_to_pinecone(output_dir, schema_data, automation_data, security_data, stats_data)
         
         # Show cache statistics
         if args.cache_stats and cache:

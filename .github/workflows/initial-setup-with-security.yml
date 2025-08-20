@@ -1,0 +1,301 @@
+name: Initial Setup with Progressive Security Collection
+
+on:
+  workflow_dispatch:
+    inputs:
+      org_alias:
+        description: 'Salesforce org alias'
+        required: true
+        default: 'MyOrg'
+      force_restart:
+        description: 'Force restart from beginning (clear cache)'
+        required: false
+        default: 'false'
+  schedule:
+    # Run daily at 2 AM UTC to avoid peak Salesforce API usage
+    - cron: '0 2 * * *'
+
+env:
+  ORG_ALIAS: ${{ github.event.inputs.org_alias || 'MyOrg' }}
+  FORCE_RESTART: ${{ github.event.inputs.force_restart || 'false' }}
+
+jobs:
+  check-setup-status:
+    runs-on: ubuntu-latest
+    outputs:
+      setup-phase: ${{ steps.check.outputs.phase }}
+      needs-security: ${{ steps.check.outputs.needs_security }}
+      security-complete: ${{ steps.check.outputs.security_complete }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check Setup Status
+        id: check
+        run: |
+          # Check if we have schema data
+          if [ -f "output_new/schema.json" ]; then
+            echo "phase=schema-complete" >> $GITHUB_OUTPUT
+            echo "needs_security=true" >> $GITHUB_OUTPUT
+            
+            # Check if security data is complete
+            if [ -f "output_new/security.json" ]; then
+              # Count objects in schema vs security
+              SCHEMA_OBJECTS=$(python -c "import json; data=json.load(open('output_new/schema.json')); print(len(data.get('objects', {})))")
+              SECURITY_OBJECTS=$(python -c "import json; data=json.load(open('output_new/security.json')); print(len(data))")
+              
+              if [ "$SCHEMA_OBJECTS" = "$SECURITY_OBJECTS" ]; then
+                echo "security_complete=true" >> $GITHUB_OUTPUT
+                echo "phase=complete" >> $GITHUB_OUTPUT
+              else
+                echo "security_complete=false" >> $GITHUB_OUTPUT
+                echo "phase=security-in-progress" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "security_complete=false" >> $GITHUB_OUTPUT
+              echo "phase=security-not-started" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "phase=not-started" >> $GITHUB_OUTPUT
+            echo "needs_security=false" >> $GITHUB_OUTPUT
+            echo "security_complete=false" >> $GITHUB_OUTPUT
+          fi
+
+  initial-setup:
+    needs: check-setup-status
+    if: needs.check-setup-status.outputs.setup-phase == 'not-started'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r src/chatbot/requirements.txt
+
+      - name: Setup Salesforce CLI
+        run: |
+          npm install --global @salesforce/cli
+
+      - name: Authenticate to Salesforce
+        run: |
+          echo ${{ secrets.SFDX_AUTH_URL }} | sf org login sfdx-url --set-default --alias ${{ env.ORG_ALIAS }}
+
+      - name: Run Initial Setup (Phase 1)
+        env:
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD || 'aws' }}
+          PINECONE_REGION: ${{ secrets.PINECONE_REGION || 'us-east-1' }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME || 'salesforce-schema' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python src/pipeline/build_schema_library_end_to_end.py \
+            --org-alias ${{ env.ORG_ALIAS }} \
+            --output ./output_new \
+            --max-workers 3 \
+            --cache-dir cache_new \
+            --cache-max-age 24 \
+            --with-stats \
+            --with-automation \
+            --emit-jsonl \
+            --push-to-pinecone \
+            --resume
+
+      - name: Commit initial setup
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add output_new/ cache_new/
+          git commit -m "Initial setup complete - schema, stats, and automation data pushed to Pinecone" || exit 0
+          git push
+
+  security-collection:
+    needs: check-setup-status
+    if: needs.check-setup-status.outputs.needs-security == 'true' && needs.check-setup-status.outputs.security-complete == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r src/chatbot/requirements.txt
+
+      - name: Setup Salesforce CLI
+        run: |
+          npm install --global @salesforce/cli
+
+      - name: Authenticate to Salesforce
+        run: |
+          echo ${{ secrets.SFDX_AUTH_URL }} | sf org login sfdx-url --set-default --alias ${{ env.ORG_ALIAS }}
+
+      - name: Clear cache if force restart
+        if: env.FORCE_RESTART == 'true'
+        run: |
+          rm -rf cache_new/
+          rm -f output_new/security.json
+
+      - name: Run Security Data Collection
+        env:
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD || 'aws' }}
+          PINECONE_REGION: ${{ secrets.PINECONE_REGION || 'us-east-1' }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME || 'salesforce-schema' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python src/pipeline/build_schema_library_end_to_end.py \
+            --org-alias ${{ env.ORG_ALIAS }} \
+            --output ./output_new \
+            --max-workers 3 \
+            --cache-dir cache_new \
+            --cache-max-age 24 \
+            --with-security \
+            --resume
+
+      - name: Check if security collection is complete
+        id: check-completion
+        run: |
+          if [ -f "output_new/security.json" ]; then
+            # Count objects in schema vs security
+            SCHEMA_OBJECTS=$(python -c "import json; data=json.load(open('output_new/schema.json')); print(len(data.get('objects', {})))")
+            SECURITY_OBJECTS=$(python -c "import json; data=json.load(open('output_new/security.json')); print(len(data))")
+            
+            if [ "$SCHEMA_OBJECTS" = "$SECURITY_OBJECTS" ]; then
+              echo "complete=true" >> $GITHUB_OUTPUT
+              echo "objects_processed=$SECURITY_OBJECTS" >> $GITHUB_OUTPUT
+            else
+              echo "complete=false" >> $GITHUB_OUTPUT
+              echo "objects_processed=$SECURITY_OBJECTS" >> $GITHUB_OUTPUT
+              echo "total_objects=$SCHEMA_OBJECTS" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "complete=false" >> $GITHUB_OUTPUT
+            echo "objects_processed=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit security progress
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add output_new/ cache_new/
+          
+          if [ "${{ steps.check-completion.outputs.complete }}" = "true" ]; then
+            git commit -m "Security data collection complete - ${{ steps.check-completion.outputs.objects_processed }} objects processed" || exit 0
+          else
+            git commit -m "Security data collection progress - ${{ steps.check-completion.outputs.objects_processed }}/${{ steps.check-completion.outputs.total_objects }} objects processed" || exit 0
+          fi
+          
+          git push
+
+  final-security-push:
+    needs: check-setup-status
+    if: needs.check-setup-status.outputs.security-complete == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r src/chatbot/requirements.txt
+
+      - name: Setup Salesforce CLI
+        run: |
+          npm install --global @salesforce/cli
+
+      - name: Authenticate to Salesforce
+        run: |
+          echo ${{ secrets.SFDX_AUTH_URL }} | sf org login sfdx-url --set-default --alias ${{ env.ORG_ALIAS }}
+
+      - name: Push Complete Security Data to Pinecone
+        env:
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD || 'aws' }}
+          PINECONE_REGION: ${{ secrets.PINECONE_REGION || 'us-east-1' }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME || 'salesforce-schema' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python src/pipeline/build_schema_library_end_to_end.py \
+            --org-alias ${{ env.ORG_ALIAS }} \
+            --output ./output_new \
+            --max-workers 3 \
+            --cache-dir cache_new \
+            --cache-max-age 24 \
+            --with-security \
+            --emit-jsonl \
+            --push-to-pinecone \
+            --resume
+
+      - name: Commit final push
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add output_new/
+          git commit -m "Final security data push complete - full knowledge base now available" || exit 0
+          git push
+
+      - name: Create completion issue
+        run: |
+          gh issue create \
+            --title "🎉 Initial Setup Complete!" \
+            --body "Your Salesforce Schema AI Assistant is now fully set up with complete security knowledge! Your bot can now answer security questions like 'Which profiles can delete Contacts?' and 'What fields can the Admin profile edit on Account?'" \
+            --label "setup-complete" \
+            --label "documentation"
+
+  setup-complete:
+    needs: [check-setup-status, initial-setup, security-collection, final-security-push]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Status Summary
+        run: |
+          echo "## Setup Status Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Current Phase:** ${{ needs.check-setup-status.outputs.setup-phase }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.check-setup-status.outputs.setup-phase }}" = "complete" ]; then
+            echo "🎉 **Setup is complete!** Your AI assistant is ready to use." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**What's available:**" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Complete schema knowledge" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Security and permission data" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ All data in Pinecone vector database" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Next steps:** Deploy to Streamlit Cloud and start using your AI assistant!" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.check-setup-status.outputs.setup-phase }}" = "schema-complete" ]; then
+            echo "📊 **Schema setup complete!** Security data collection in progress..." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**What's available:**" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Schema knowledge (objects, fields, relationships)" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Usage statistics and automation data" >> $GITHUB_STEP_SUMMARY
+            echo "- 🔄 Security data collection in progress" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Next:** This workflow will continue daily until security collection is complete." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🚀 **Initial setup in progress...**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**What's happening:**" >> $GITHUB_STEP_SUMMARY
+            echo "- 🔄 Setting up schema, stats, and automation data" >> $GITHUB_STEP_SUMMARY
+            echo "- 📊 Will push to Pinecone when complete" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Next:** Security data collection will begin after initial setup." >> $GITHUB_STEP_SUMMARY
+          fi

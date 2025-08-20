@@ -210,18 +210,110 @@ sf org login web -a MyOrg
 > - Or check the org name in Setup → Company Information → Organization Name
 > - Examples: If your URL is `acme.my.salesforce.com`, use `acme` or `AcmeCorp`
 
-### Step 5: Extract Your Salesforce Schema
+### Step 5: Extract Your Salesforce Schema (Automated Multi-Phase Setup)
+
+**🎉 NEW: Fully Automated Setup!** 
+
+We've created a GitHub Action that automatically handles the entire multi-phase setup process. You can now set it up once and let it run automatically in the background!
+
+#### Option A: Automated Setup (Recommended)
+
+1. **Add GitHub Secrets** (see [Automated Daily Updates](#-automated-daily-updates-github-actions) section)
+2. **Run the automated workflow**:
+   - Go to Actions tab in your GitHub repo
+   - Click "Initial Setup with Progressive Security Collection"
+   - Click "Run workflow"
+   - Enter your org alias (e.g., "MyOrg")
+   - Click "Run workflow"
+
+**That's it!** The workflow will:
+- ✅ **Day 1**: Complete initial setup and push to Pinecone (bot works immediately!)
+- ✅ **Days 2-6**: Automatically collect security data in chunks (200 objects/day)
+- ✅ **Day 7**: Automatically push complete security data to Pinecone
+- ✅ **Completion**: Creates a GitHub issue when everything is done
+
+**You'll get:**
+- 🚀 **Working bot on Day 1** with schema knowledge
+- 📈 **Progressive security knowledge** building over days
+- 🔔 **Automatic notifications** when complete
+- 📊 **Progress tracking** in GitHub Actions
+
+#### Option B: Manual Setup (Original Method)
+
+If you prefer to run it manually, here's the original multi-phase approach:
+
+#### Phase 1: Initial Setup (Get Your Bot Working Today)
 
 ```bash
-# Run the optimized pipeline (takes 15-30 minutes)
-python run_optimized_pipeline.py --org-alias MyOrg --with-stats --with-automation --emit-markdown --emit-jsonl --push-to-pinecone
+# Get everything EXCEPT security data and push to Pinecone immediately
+python src/pipeline/build_schema_library_end_to_end.py --org-alias MyOrg --output ./output_new --max-workers 3 --cache-dir cache_new --cache-max-age 24 --with-stats --with-automation --emit-jsonl --push-to-pinecone --resume
 ```
 
 This will:
-- Connect to YOUR Salesforce org
-- Download all objects, fields, and metadata
-- Create embeddings and upload to Pinecone
-- Generate documentation files
+- ✅ Connect to YOUR Salesforce org
+- ✅ Download all objects, fields, and metadata
+- ✅ Get usage statistics and automation data
+- ✅ Create embeddings and upload to Pinecone
+- ✅ **Your bot is now working!** 🎉
+
+**What your bot can answer immediately:**
+- "What fields are on the Account object?"
+- "Show me all validation rules for Contacts"
+- "What automation exists on Opportunity?"
+- "How many records are in each object?"
+
+#### Phase 2: Security Data Collection (Next 4-5 Days)
+
+```bash
+# Collect security data over multiple days (runs until it hits API limits)
+python src/pipeline/build_schema_library_end_to_end.py --org-alias MyOrg --output ./output_new --max-workers 3 --cache-dir cache_new --cache-max-age 24 --with-security --resume
+```
+
+**Run this same command each day until it completes:**
+- **Day 1**: Processes ~200 objects, hits limits, saves progress
+- **Day 2**: Resumes from where it left off, processes next ~200 objects
+- **Day 3**: Continues with next batch
+- **Day 4-5**: Completes remaining objects
+
+**The pipeline automatically:**
+- ✅ Saves partial progress each day
+- ✅ Resumes exactly where it left off
+- ✅ Skips already-processed objects
+- ✅ Shows clear progress indicators
+
+#### Phase 3: Final Security Push (When Complete)
+
+```bash
+# Push complete security data to Pinecone (run when Phase 2 finishes)
+python src/pipeline/build_schema_library_end_to_end.py --org-alias MyOrg --output ./output_new --max-workers 3 --cache-dir cache_new --cache-max-age 24 --with-security --emit-jsonl --push-to-pinecone --resume
+```
+
+**What your bot can now answer:**
+- "Which profiles can delete Contacts?"
+- "What fields can the Admin profile edit on Account?"
+- "Which permission sets grant access to Opportunity fields?"
+- "Who has read access to sensitive fields?"
+
+#### Phase 4: Daily Updates (Ongoing)
+
+Once everything is complete, daily updates are much faster:
+
+```bash
+# Future daily updates - only processes changed objects, no API limits
+python src/pipeline/build_schema_library_end_to_end.py --org-alias MyOrg --output ./output_new --max-workers 3 --cache-dir cache_new --cache-max-age 24 --with-security --with-stats --emit-jsonl --push-to-pinecone --resume
+```
+
+**Why this approach works:**
+- 🚀 **Immediate value** - Your bot works today with rich schema knowledge
+- 📈 **Progressive enhancement** - Security knowledge builds over days
+- ⚡ **Future efficiency** - Daily updates only process changes, not everything
+- 🔄 **No data loss** - Each day builds on previous progress
+
+**Timeline:**
+- **Today**: Complete setup + Pinecone push (bot works!)
+- **Days 2-6**: Security data collection (200 objects/day)
+- **Day 7**: Final security push (complete knowledge)
+- **Ongoing**: Daily incremental updates (fast, no limits)
 
 ### Step 6: Start the AI Assistant
 
@@ -450,7 +542,20 @@ docker run -p 8501:8501 \
 
 ## 🔄 Automated Daily Updates (GitHub Actions)
 
-Keep your schema up-to-date automatically!
+Keep your schema up-to-date automatically! **Note**: This is for ongoing daily updates after your initial setup is complete.
+
+### Initial Setup vs Daily Updates
+
+**Initial Setup (First Time):**
+- Use the automated workflow: "Initial Setup with Progressive Security Collection"
+- Takes 4-7 days to complete due to API limits
+- Builds complete security knowledge progressively
+- **Fully automated** - runs daily until complete
+
+**Daily Updates (Ongoing):**
+- Much faster - only processes changed objects
+- No API limit issues - only incremental changes
+- Can be automated with GitHub Actions
 
 ### Step 1: Fork This Repository
 
@@ -647,8 +752,11 @@ python run_optimized_pipeline.py --skip-stats --skip-automation
 Just use `sf org login web` - it will open your browser to log into ANY Salesforce org (Production, Sandbox, or Developer).
 
 ### "How long does the pipeline take?"
-- First run: 15-30 minutes for most orgs
-- Daily updates: 2-5 minutes (only processes changes)
+- **Initial setup**: 4-7 days (multi-phase approach due to API limits)
+  - Phase 1: 30 minutes (bot works immediately)
+  - Phase 2: 4-5 days (security data collection)
+  - Phase 3: 30 minutes (final security push)
+- **Daily updates**: 2-5 minutes (only processes changes, no API limits)
 
 ### "Can I use this with multiple orgs?"
 Yes! Give each org a different alias when logging in, then run the pipeline for each.

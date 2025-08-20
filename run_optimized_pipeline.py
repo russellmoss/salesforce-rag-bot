@@ -29,6 +29,7 @@ def main():
     # Feature flags
     parser.add_argument("--with-stats", action="store_true", help="Include usage statistics")
     parser.add_argument("--with-automation", action="store_true", help="Include automation data")
+    parser.add_argument("--with-security", action="store_true", help="Include security data (profiles, permission sets, object permissions)")
     parser.add_argument("--with-metadata", action="store_true", help="Include metadata")
     parser.add_argument("--emit-markdown", action="store_true", help="Emit markdown files")
     parser.add_argument("--emit-jsonl", action="store_true", help="Emit JSONL files")
@@ -67,9 +68,7 @@ def main():
         "--output", args.output,
         "--max-workers", str(args.max_workers),
         "--cache-dir", args.cache_dir,
-        "--cache-max-age", str(args.cache_max_age),
-        "--throttle-ms", str(args.throttle_ms),
-        "--embed-batch-size", str(args.embed_batch_size)
+        "--cache-max-age", str(args.cache_max_age)
     ]
     
     # Add feature flags
@@ -77,6 +76,8 @@ def main():
         cmd.append("--with-stats")
     if args.with_automation:
         cmd.append("--with-automation")
+    if args.with_security:
+        cmd.append("--with-security")
     if args.with_metadata:
         cmd.append("--with-metadata")
     if args.emit_markdown:
@@ -113,7 +114,24 @@ def main():
     print(f"Cache Max Age: {args.cache_max_age} hours")
     print(f"Throttle: {args.throttle_ms}ms")
     print(f"Embed Batch Size: {args.embed_batch_size}")
-    print(f"Features: {' '.join([f for f in ['stats', 'automation', 'metadata', 'markdown', 'jsonl', 'pinecone'] if getattr(args, f'with_{f}' if f != 'markdown' else 'emit_markdown') or getattr(args, f'emit_{f}' if f in ['markdown', 'jsonl'] else f'push_to_{f}')])}")
+    # Build feature list
+    features = []
+    if args.with_stats:
+        features.append("stats")
+    if args.with_automation:
+        features.append("automation")
+    if args.with_security:
+        features.append("security")
+    if args.with_metadata:
+        features.append("metadata")
+    if args.emit_markdown:
+        features.append("markdown")
+    if args.emit_jsonl:
+        features.append("jsonl")
+    if args.push_to_pinecone:
+        features.append("pinecone")
+    
+    print(f"Features: {' '.join(features)}")
     print(f"Optimizations: {' '.join([f for f in ['cache_stats', 'clear_cache', 'resume', 'stats_resume'] if getattr(args, f)])}")
     print("=" * 60)
     
