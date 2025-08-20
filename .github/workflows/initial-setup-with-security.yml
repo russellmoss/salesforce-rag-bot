@@ -6,7 +6,7 @@ on:
       org_alias:
         description: 'Salesforce org alias'
         required: true
-        default: 'MyOrg'
+        default: 'NEWORG'
       force_restart:
         description: 'Force restart from beginning (clear cache)'
         required: false
@@ -16,7 +16,7 @@ on:
     - cron: '0 2 * * *'
 
 env:
-  ORG_ALIAS: ${{ github.event.inputs.org_alias || 'MyOrg' }}
+  ORG_ALIAS: ${{ github.event.inputs.org_alias || 'NEWORG' }}
   FORCE_RESTART: ${{ github.event.inputs.force_restart || 'false' }}
 
 jobs:
