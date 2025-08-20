@@ -78,7 +78,7 @@ This isn't just another Salesforce tool - it's your **AI-powered Salesforce expe
 - [🌐 Deploy to the Cloud](#-deploy-your-chatbot-to-the-cloud-free-hosting)
 - [🔄 Automated Daily Updates](#-automated-daily-updates-github-actions)
 - [🐳 Docker Installation](#-docker-installation-alternative)
-- [📁 What Gets Created?](#-what-gets-created)
+- [📁 What Gets Created?](#-what-gets-created-local-deployment)
 - [🛠️ Customization](#️-customization)
 - [❓ FAQ](#-faq)
 - [🆘 Troubleshooting](#️-troubleshooting)
@@ -120,10 +120,42 @@ Ask questions like:
 
 You'll need:
 1. A computer with Python 3.11+ installed
-2. A Salesforce account (any type - Production, Sandbox, or Developer)
-3. API keys from:
+2. **Salesforce CLI** installed and authenticated
+3. A Salesforce account (any type - Production, Sandbox, or Developer)
+4. API keys from:
    - [Pinecone](https://pinecone.io) (free tier available)
    - [OpenAI](https://platform.openai.com) (or Anthropic/Google as alternatives)
+
+#### Install Salesforce CLI
+
+**Windows:**
+```bash
+# Download and install from https://developer.salesforce.com/tools/sfdxcli
+# Or use winget:
+winget install Salesforce.SalesforceCLI
+```
+
+**macOS:**
+```bash
+# Using Homebrew
+brew install salesforce-cli
+
+# Or using npm
+npm install --global @salesforce/cli
+```
+
+**Linux:**
+```bash
+# Using npm
+npm install --global @salesforce/cli
+
+# Or download from https://developer.salesforce.com/tools/sfdxcli
+```
+
+**Verify installation:**
+```bash
+sf --version
+```
 
 ### Step 1: Clone the Repository
 
@@ -165,6 +197,11 @@ GOOGLE_API_KEY=your-google-key
 sf org login web -a MyOrg
 ```
 
+**If you get an error about Salesforce CLI not being found:**
+1. Make sure you installed Salesforce CLI (see Prerequisites above)
+2. Restart your terminal/command prompt
+3. Try the command again
+
 > **Note**: Replace `MyOrg` with a name for your org (e.g., `ProductionOrg`, `MyCompany`, etc.)
 > 
 > **💡 How to find your org name:** 
@@ -177,7 +214,7 @@ sf org login web -a MyOrg
 
 ```bash
 # Run the optimized pipeline (takes 15-30 minutes)
-python run_optimized_pipeline.py --org-alias MyOrg
+python run_optimized_pipeline.py --org-alias MyOrg --with-stats --with-automation --emit-markdown --emit-jsonl --push-to-pinecone
 ```
 
 This will:
@@ -193,6 +230,13 @@ streamlit run src/chatbot/app.py
 ```
 
 Open your browser to `http://localhost:8501` and start chatting with your Salesforce schema!
+
+### 🧪 Quick Test
+
+To verify everything is working, try asking:
+- "What objects do I have?"
+- "Show me the Account object fields"
+- "What validation rules exist?"
 
 ## 📋 What to Expect During Setup
 
@@ -539,13 +583,22 @@ sf org display -a MyOrg
 sf org login web -a MyOrg --set-default
 ```
 
+### Salesforce CLI not found?
+1. **Install Salesforce CLI** (see Prerequisites section above)
+2. **Restart your terminal** after installation
+3. **Verify installation**: `sf --version`
+4. **Try the login command again**
+
 ### Pipeline fails?
 ```bash
 # Run with more details
-python run_optimized_pipeline.py --verbose
+python run_optimized_pipeline.py --org-alias MyOrg --verbose
 
 # Check API limits
 sf org limits -a MyOrg
+
+# Check if Salesforce CLI is working
+sf org display -a MyOrg
 ```
 
 ### Chatbot not finding data?
