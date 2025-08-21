@@ -83,9 +83,34 @@ jobs:
         run: |
           npm install --global @salesforce/cli
 
-      - name: Authenticate to Salesforce
+      - name: Check if already authenticated
+        id: auth-check
         run: |
-          echo "${{ secrets.SFDX_AUTH_URL }}" | sf org login sfdx-url --sfdx-url-stdin --set-default --alias ${{ env.ORG_ALIAS }}
+          if sf org list --json | grep -q "${{ env.ORG_ALIAS }}"; then
+            echo "already_authenticated=true" >> $GITHUB_OUTPUT
+          else
+            echo "already_authenticated=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Authenticate to Salesforce
+        if: steps.auth-check.outputs.already_authenticated != 'true'
+        run: |
+          # Retry authentication up to 3 times with exponential backoff
+          for attempt in 1 2 3; do
+            echo "Authentication attempt $attempt..."
+            if echo "${{ secrets.SFDX_AUTH_URL }}" | sf org login sfdx-url --sfdx-url-stdin --set-default --alias ${{ env.ORG_ALIAS }}; then
+              echo "Authentication successful on attempt $attempt"
+              break
+            else
+              if [ $attempt -lt 3 ]; then
+                echo "Authentication failed, waiting before retry..."
+                sleep $((attempt * 60))  # Wait 1, 2, then 3 minutes
+              else
+                echo "Authentication failed after 3 attempts"
+                exit 1
+              fi
+            fi
+          done
 
       - name: Run Initial Setup (Phase 1)
         env:
@@ -137,9 +162,34 @@ jobs:
         run: |
           npm install --global @salesforce/cli
 
-      - name: Authenticate to Salesforce
+      - name: Check if already authenticated
+        id: auth-check
         run: |
-          echo "${{ secrets.SFDX_AUTH_URL }}" | sf org login sfdx-url --sfdx-url-stdin --set-default --alias ${{ env.ORG_ALIAS }}
+          if sf org list --json | grep -q "${{ env.ORG_ALIAS }}"; then
+            echo "already_authenticated=true" >> $GITHUB_OUTPUT
+          else
+            echo "already_authenticated=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Authenticate to Salesforce
+        if: steps.auth-check.outputs.already_authenticated != 'true'
+        run: |
+          # Retry authentication up to 3 times with exponential backoff
+          for attempt in 1 2 3; do
+            echo "Authentication attempt $attempt..."
+            if echo "${{ secrets.SFDX_AUTH_URL }}" | sf org login sfdx-url --sfdx-url-stdin --set-default --alias ${{ env.ORG_ALIAS }}; then
+              echo "Authentication successful on attempt $attempt"
+              break
+            else
+              if [ $attempt -lt 3 ]; then
+                echo "Authentication failed, waiting before retry..."
+                sleep $((attempt * 60))  # Wait 1, 2, then 3 minutes
+              else
+                echo "Authentication failed after 3 attempts"
+                exit 1
+              fi
+            fi
+          done
 
       - name: Clear cache if force restart
         if: env.FORCE_RESTART == 'true'
@@ -221,9 +271,34 @@ jobs:
         run: |
           npm install --global @salesforce/cli
 
-      - name: Authenticate to Salesforce
+      - name: Check if already authenticated
+        id: auth-check
         run: |
-          echo "${{ secrets.SFDX_AUTH_URL }}" | sf org login sfdx-url --sfdx-url-stdin --set-default --alias ${{ env.ORG_ALIAS }}
+          if sf org list --json | grep -q "${{ env.ORG_ALIAS }}"; then
+            echo "already_authenticated=true" >> $GITHUB_OUTPUT
+          else
+            echo "already_authenticated=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Authenticate to Salesforce
+        if: steps.auth-check.outputs.already_authenticated != 'true'
+        run: |
+          # Retry authentication up to 3 times with exponential backoff
+          for attempt in 1 2 3; do
+            echo "Authentication attempt $attempt..."
+            if echo "${{ secrets.SFDX_AUTH_URL }}" | sf org login sfdx-url --sfdx-url-stdin --set-default --alias ${{ env.ORG_ALIAS }}; then
+              echo "Authentication successful on attempt $attempt"
+              break
+            else
+              if [ $attempt -lt 3 ]; then
+                echo "Authentication failed, waiting before retry..."
+                sleep $((attempt * 60))  # Wait 1, 2, then 3 minutes
+              else
+                echo "Authentication failed after 3 attempts"
+                exit 1
+              fi
+            fi
+          done
 
       - name: Push Complete Security Data to Pinecone
         env:
