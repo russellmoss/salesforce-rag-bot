@@ -112,6 +112,16 @@ jobs:
             fi
           done
 
+      - name: Clear cache if force restart
+        if: env.FORCE_RESTART == 'true'
+        run: |
+          rm -rf cache_new/
+          rm -f output_new/schema.json
+          rm -f output_new/stats.json
+          rm -f output_new/automation.json
+          rm -f output_new/security.json
+          rm -f output_new/corpus.jsonl
+
       - name: Run Initial Setup (Phase 1)
         env:
           PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
@@ -196,6 +206,10 @@ jobs:
         run: |
           rm -rf cache_new/
           rm -f output_new/security.json
+          rm -f output_new/schema.json
+          rm -f output_new/stats.json
+          rm -f output_new/automation.json
+          rm -f output_new/corpus.jsonl
 
       - name: Run Security Data Collection
         env:
