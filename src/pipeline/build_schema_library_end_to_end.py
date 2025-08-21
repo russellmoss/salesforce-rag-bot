@@ -1300,6 +1300,15 @@ def push_to_pinecone(output_dir: Path, schema_data: Dict[str, Any], automation_d
         # Get the index
         index = pc.Index(index_name)
         
+        # Clear existing data before uploading new data
+        logger.info("Clearing existing data from Pinecone index...")
+        try:
+            index.delete(delete_all=True)
+            logger.info("Successfully cleared existing data")
+        except Exception as e:
+            logger.warning(f"Could not clear existing data: {e}")
+            logger.info("Continuing with upload (may result in duplicate data)")
+        
         # Get objects from schema data
         objects = schema_data.get('objects', {})
         
@@ -1387,7 +1396,8 @@ def push_to_pinecone(output_dir: Path, schema_data: Dict[str, Any], automation_d
                         "type": "salesforce_object",
                         "fields_count": fields_count,
                         "record_count": stats_data.get(object_name, {}).get('record_count', 0) if stats_data else 0,
-                        "content": doc_content[:1000] + "..." if len(doc_content) > 1000 else doc_content  # Truncate for metadata
+                        "content": doc_content[:1000] + "..." if len(doc_content) > 1000 else doc_content,  # Truncate for metadata
+                        "text": doc_content  # Add text field for LangChain compatibility
                     }
                 }
                 

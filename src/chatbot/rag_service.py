@@ -109,9 +109,45 @@ class RAGService:
         try:
             # Use higher top_k for more comprehensive context
             top_k = top_k or config.TOP_K  # Now defaults to 10 instead of 5
+            
+            # Simple direct approach: Get all documents and filter by object name
+            all_results = self.vector_store.similarity_search("", k=1000)  # Get all results
+            
+            # Filter for specific objects mentioned in query
+            target_objects = []
+            query_lower = query.lower()
+            
+            if 'account' in query_lower:
+                target_objects.append('account')
+            if 'contact' in query_lower:
+                target_objects.append('contact')
+            if 'lead' in query_lower:
+                target_objects.append('lead')
+            if 'opportunity' in query_lower:
+                target_objects.append('opportunity')
+            if 'case' in query_lower:
+                target_objects.append('case')
+            
+            # If specific objects are mentioned, prioritize them
+            if target_objects:
+                results = []
+                for doc in all_results:
+                    object_name = doc.metadata.get('object_name', '').lower()
+                    if object_name in target_objects:
+                        results.append(doc)
+                        if len(results) >= top_k:
+                            break
+                
+                # If we found target objects, return them
+                if results:
+                    logger.info(f"Retrieved {len(results)} target objects: {[doc.metadata.get('object_name', 'Unknown') for doc in results]}")
+                    return results
+            
+            # Fallback to similarity search
             results = self.vector_store.similarity_search(query, k=top_k)
-            logger.info(f"Retrieved {len(results)} documents for thorough response to query: {query[:50]}...")
+            logger.info(f"Retrieved {len(results)} documents via similarity search: {[doc.metadata.get('object_name', 'Unknown') for doc in results]}")
             return results
+            
         except Exception as e:
             logger.error(f"Error searching context: {e}")
             return []
@@ -125,7 +161,8 @@ class RAGService:
         for i, doc in enumerate(documents, 1):
             # Extract metadata and content
             metadata = doc.metadata
-            content = doc.page_content
+            # Try different content fields - LangChain Pinecone uses page_content, but our data has text
+            content = getattr(doc, 'page_content', None) or getattr(doc, 'text', None) or str(doc)
             
             # Format the document
             doc_info = f"Document {i}:\n"
