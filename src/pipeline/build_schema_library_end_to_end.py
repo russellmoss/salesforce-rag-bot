@@ -411,7 +411,7 @@ def get_object_permissions_from_profiles_and_permission_sets_enhanced(org: str, 
         return get_basic_profiles_and_permission_sets(org, object_names)
 
 def get_profiles_with_object_permissions_enhanced(org: str, object_names: List[str]) -> Dict[str, dict]:
-    """Get profiles with actual object permissions using enhanced Tooling API methods."""
+    """Get profiles with actual object permissions using enhanced API methods that work with org limitations."""
     profiles_data = {}
     
     try:
@@ -426,112 +426,69 @@ def get_profiles_with_object_permissions_enhanced(org: str, object_names: List[s
             profile_name = profile['Name']
             profile_id = profile['Id']
             
-            # Get object permissions for this profile using Tooling API
-            try:
-                # Query Profile object permissions for specific objects
-                for object_name in object_names:
-                    if object_name not in profiles_data:
-                        profiles_data[object_name] = {}
+            # Get object permissions for this profile using direct Profile queries
+            for object_name in object_names:
+                if object_name not in profiles_data:
+                    profiles_data[object_name] = {}
+                
+                # Try to get object permissions via direct Profile field queries
+                # This approach queries the Profile object's permission fields directly
+                profile_permission_query = f"""
+                SELECT Id, Name, UserType, 
+                       Permissions{object_name}Create, Permissions{object_name}Read, 
+                       Permissions{object_name}Edit, Permissions{object_name}Delete
+                FROM Profile 
+                WHERE Id = '{profile_id}'
+                """
+                
+                try:
+                    profile_result = run_sf(["data", "query", "--query", profile_permission_query, "--json"], org)
+                    profile_data = json.loads(profile_result)["result"]["records"]
                     
-                    # Try to get object permissions via Tooling API with enhanced query
-                    tooling_query = f"""
-                    SELECT Id, Parent.Profile.Name, SobjectType, 
-                           PermissionsCreate, PermissionsRead, PermissionsEdit, PermissionsDelete
-                    FROM ObjectPermissions 
-                    WHERE Parent.Profile.Id = '{profile_id}' 
-                    AND SobjectType = '{object_name}'
-                    """
-                    
-                    try:
-                        tooling_result = run_sf(["data", "query", "--query", tooling_query, "--json", "--use-tooling-api"], org)
-                        tooling_data = json.loads(tooling_result)["result"]["records"]
-                        
-                        if tooling_data:
-                            for perm in tooling_data:
-                                profiles_data[object_name][profile_name] = {
-                                    'profile_id': profile_id,
-                                    'user_type': profile['UserType'],
-                                    'create': perm.get('PermissionsCreate', False),
-                                    'read': perm.get('PermissionsRead', False),
-                                    'edit': perm.get('PermissionsEdit', False),
-                                    'delete': perm.get('PermissionsDelete', False),
-                                    'source': 'tooling_api_enhanced'
-                                }
-                        else:
-                            # Try alternative approach: query Profile object permissions directly
-                            alt_query = f"""
-                            SELECT Id, Name, UserType, 
-                                   Permissions{object_name}Create, Permissions{object_name}Read, 
-                                   Permissions{object_name}Edit, Permissions{object_name}Delete
-                            FROM Profile 
-                            WHERE Id = '{profile_id}'
-                            """
-                            
-                            try:
-                                alt_result = run_sf(["data", "query", "--query", alt_query, "--json"], org)
-                                alt_data = json.loads(alt_result)["result"]["records"]
-                                
-                                if alt_data:
-                                    profile_data = alt_data[0]
-                                    profiles_data[object_name][profile_name] = {
-                                        'profile_id': profile_id,
-                                        'user_type': profile['UserType'],
-                                        'create': profile_data.get(f'Permissions{object_name}Create', False),
-                                        'read': profile_data.get(f'Permissions{object_name}Read', True),  # Most profiles have read access
-                                        'edit': profile_data.get(f'Permissions{object_name}Edit', False),
-                                        'delete': profile_data.get(f'Permissions{object_name}Delete', False),
-                                        'source': 'profile_direct_query'
-                                    }
-                                else:
-                                    # Fallback: use profile metadata to infer permissions
-                                    profiles_data[object_name][profile_name] = {
-                                        'profile_id': profile_id,
-                                        'user_type': profile['UserType'],
-                                        'create': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
-                                        'read': True,  # Most profiles have read access
-                                        'edit': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
-                                        'delete': profile['UserType'] == 'Standard',  # Only Standard profiles typically have delete
-                                        'source': 'inferred_from_user_type'
-                                    }
-                                    
-                            except Exception as alt_error:
-                                logger.debug(f"Alternative query failed for {profile_name} on {object_name}: {alt_error}")
-                                # Use inferred permissions as fallback
-                                profiles_data[object_name][profile_name] = {
-                                    'profile_id': profile_id,
-                                    'user_type': profile['UserType'],
-                                    'create': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
-                                    'read': True,
-                                    'edit': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
-                                    'delete': profile['UserType'] == 'Standard',
-                                    'source': 'inferred_from_user_type'
-                                }
-                            
-                    except Exception as e:
-                        logger.warning(f"Could not get object permissions for {profile_name} on {object_name}: {e}")
-                        # Use inferred permissions as fallback
+                    if profile_data:
+                        profile_record = profile_data[0]
+                        profiles_data[object_name][profile_name] = {
+                            'profile_id': profile_id,
+                            'user_type': profile['UserType'],
+                            'create': profile_record.get(f'Permissions{object_name}Create', False),
+                            'read': profile_record.get(f'Permissions{object_name}Read', True),  # Most profiles have read access
+                            'edit': profile_record.get(f'Permissions{object_name}Edit', False),
+                            'delete': profile_record.get(f'Permissions{object_name}Delete', False),
+                            'source': 'profile_direct_query'
+                        }
+                    else:
+                        # Fallback: use profile metadata to infer permissions
                         profiles_data[object_name][profile_name] = {
                             'profile_id': profile_id,
                             'user_type': profile['UserType'],
                             'create': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
-                            'read': True,
+                            'read': True,  # Most profiles have read access
                             'edit': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
-                            'delete': profile['UserType'] == 'Standard',
+                            'delete': profile['UserType'] == 'Standard',  # Only Standard profiles typically have delete
                             'source': 'inferred_from_user_type'
                         }
                         
-            except Exception as e:
-                logger.warning(f"Error processing profile {profile_name}: {e}")
-                continue
-        
-        return profiles_data
-        
+                except Exception as profile_error:
+                    logger.debug(f"Profile permission query failed for {profile_name} on {object_name}: {profile_error}")
+                    # Use inferred permissions as fallback
+                    profiles_data[object_name][profile_name] = {
+                        'profile_id': profile_id,
+                        'user_type': profile['UserType'],
+                        'create': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
+                        'read': True,
+                        'edit': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
+                        'delete': profile['UserType'] == 'Standard',
+                        'source': 'inferred_from_user_type'
+                    }
+                        
     except Exception as e:
         logger.error(f"Error getting profiles with object permissions: {e}")
         return {}
+    
+    return profiles_data
 
 def get_permission_sets_with_object_permissions_enhanced(org: str, object_names: List[str]) -> Dict[str, dict]:
-    """Get permission sets with actual object permissions using enhanced Tooling API methods."""
+    """Get permission sets with basic information since ObjectPermissions is not available in this org."""
     permission_sets_data = {}
     
     try:
@@ -542,67 +499,27 @@ def get_permission_sets_with_object_permissions_enhanced(org: str, object_names:
         
         logger.info(f"Found {len(permission_sets)} permission sets to analyze")
         
+        # Since ObjectPermissions is not available, we'll provide basic permission set info
+        # and let the bot know that detailed permissions are not available
         for ps in permission_sets:
             ps_name = ps['Label']
             ps_id = ps['Id']
             
-            # Get object permissions for this permission set using Tooling API
-            try:
-                for object_name in object_names:
-                    if object_name not in permission_sets_data:
-                        permission_sets_data[object_name] = {}
-                    
-                    # Query PermissionSet object permissions with enhanced query
-                    tooling_query = f"""
-                    SELECT Id, Parent.PermissionSet.Label, SobjectType, 
-                           PermissionsCreate, PermissionsRead, PermissionsEdit, PermissionsDelete
-                    FROM ObjectPermissions 
-                    WHERE Parent.PermissionSet.Id = '{ps_id}' 
-                    AND SobjectType = '{object_name}'
-                    """
-                    
-                    try:
-                        tooling_result = run_sf(["data", "query", "--query", tooling_query, "--json", "--use-tooling-api"], org)
-                        tooling_data = json.loads(tooling_result)["result"]["records"]
-                        
-                        if tooling_data:
-                            for perm in tooling_data:
-                                permission_sets_data[object_name][ps_name] = {
-                                    'permission_set_id': ps_id,
-                                    'name': ps['Name'],
-                                    'create': perm.get('PermissionsCreate', False),
-                                    'read': perm.get('PermissionsRead', False),
-                                    'edit': perm.get('PermissionsEdit', False),
-                                    'delete': perm.get('PermissionsDelete', False),
-                                    'source': 'tooling_api_enhanced'
-                                }
-                        else:
-                            # No explicit permissions found - permission set doesn't grant object access
-                            permission_sets_data[object_name][ps_name] = {
-                                'permission_set_id': ps_id,
-                                'name': ps['Name'],
-                                'create': False,
-                                'read': False,
-                                'edit': False,
-                                'delete': False,
-                                'source': 'no_permissions_found'
-                            }
-                            
-                    except Exception as e:
-                        logger.warning(f"Could not get object permissions for {ps_name} on {object_name}: {e}")
-                        permission_sets_data[object_name][ps_name] = {
-                            'permission_set_id': ps_id,
-                            'name': ps['Name'],
-                            'create': False,
-                            'read': False,
-                            'edit': False,
-                            'delete': False,
-                            'source': 'error_occurred'
-                        }
-                        
-            except Exception as e:
-                logger.warning(f"Error processing permission set {ps_name}: {e}")
-                continue
+            for object_name in object_names:
+                if object_name not in permission_sets_data:
+                    permission_sets_data[object_name] = {}
+                
+                # Provide basic permission set information without detailed permissions
+                permission_sets_data[object_name][ps_name] = {
+                    'permission_set_id': ps_id,
+                    'name': ps['Name'],
+                    'create': False,  # Cannot determine without ObjectPermissions
+                    'read': False,    # Cannot determine without ObjectPermissions
+                    'edit': False,    # Cannot determine without ObjectPermissions
+                    'delete': False,  # Cannot determine without ObjectPermissions
+                    'source': 'basic_info_only',
+                    'note': 'Detailed permissions not available - ObjectPermissions sObject not supported in this org'
+                }
         
         return permission_sets_data
         

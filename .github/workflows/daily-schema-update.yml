@@ -1,0 +1,74 @@
+name: Daily Salesforce Schema Update
+
+on:
+  schedule:
+    # Run daily at 1 AM UTC
+    - cron: '0 1 * * *'
+  workflow_dispatch: # Manual trigger
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/pipeline/**'
+      - 'requirements.txt'
+      - 'Dockerfile'
+
+jobs:
+  update-schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 480
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Salesforce CLI
+        run: |
+          npm install --global @salesforce/cli
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Authenticate to Salesforce
+        run: |
+          echo "${{ secrets.SFDX_AUTH_URL }}" | sf org login sfdx-url --sfdx-url-stdin --set-default-dev-hub
+      - name: Run Schema Pipeline
+        run: |
+          python src/pipeline/build_schema_library_end_to_end.py \
+            --org-alias "${{ secrets.SF_ORG_ALIAS }}" \
+            --output ./output \
+            --with-metadata \
+            --emit-markdown \
+            --emit-jsonl \
+            --push-to-pinecone \
+            --resume \
+            --stats-resume \
+            --max-workers 15
+        env:
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
+          PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-output
+          path: output/
+          retention-days: 7
+
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "✅ Salesforce schema update completed successfully!"
+          echo "📊 Data pushed to Pinecone index: ${{ secrets.PINECONE_INDEX_NAME || 'salesforce-schema' }}"
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Salesforce schema update failed!"
+          echo "Please check the logs for details."

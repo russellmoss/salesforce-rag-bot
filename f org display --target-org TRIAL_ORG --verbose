@@ -1,0 +1,5 @@
+[33m1a5767b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Fix RAG bot search to properly find Account objects and provide detailed responses
+[33maf2487e[m Fix org alias default to NEWORG in GitHub workflow
+[33md99069c[m Fix Salesforce CLI authentication command in GitHub workflow
+[33meb41787[m Add automated multi-phase setup workflow with progressive security collection
+[33m33dd035[m Add comprehensive email alerts and monitoring system with setup guides

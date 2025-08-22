@@ -40,3 +40,4 @@ if field_permissions:
         print(f"  - {fp}")
 else:
     print("  - No field permissions found")
+
