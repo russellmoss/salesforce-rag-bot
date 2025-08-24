@@ -411,11 +411,11 @@ def get_object_permissions_from_profiles_and_permission_sets_enhanced(org: str, 
         return get_basic_profiles_and_permission_sets(org, object_names)
 
 def get_profiles_with_object_permissions_enhanced(org: str, object_names: List[str]) -> Dict[str, dict]:
-    """Get profiles with actual object permissions using enhanced API methods that work with org limitations."""
+    """Get profiles with basic information since detailed permission fields are not available in this org."""
     profiles_data = {}
     
     try:
-        # Query all profiles
+        # Query all profiles - just get basic info
         profiles_query = "SELECT Id, Name, UserType FROM Profile WHERE UserType != 'Guest'"
         profiles_result = run_sf(["data", "query", "--query", profiles_query, "--json"], org)
         profiles = json.loads(profiles_result)["result"]["records"]
@@ -426,65 +426,26 @@ def get_profiles_with_object_permissions_enhanced(org: str, object_names: List[s
             profile_name = profile['Name']
             profile_id = profile['Id']
             
-            # Get object permissions for this profile using direct Profile queries
+            # Since detailed permission fields don't exist, use inferred permissions based on UserType
             for object_name in object_names:
                 if object_name not in profiles_data:
                     profiles_data[object_name] = {}
                 
-                # Try to get object permissions via direct Profile field queries
-                # This approach queries the Profile object's permission fields directly
-                profile_permission_query = f"""
-                SELECT Id, Name, UserType, 
-                       Permissions{object_name}Create, Permissions{object_name}Read, 
-                       Permissions{object_name}Edit, Permissions{object_name}Delete
-                FROM Profile 
-                WHERE Id = '{profile_id}'
-                """
-                
-                try:
-                    profile_result = run_sf(["data", "query", "--query", profile_permission_query, "--json"], org)
-                    profile_data = json.loads(profile_result)["result"]["records"]
+                profiles_data[object_name][profile_name] = {
+                    'profile_id': profile_id,
+                    'user_type': profile['UserType'],
+                    'create': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
+                    'read': True,  # Most profiles have read access
+                    'edit': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
+                    'delete': profile['UserType'] == 'Standard',  # Only Standard profiles typically have delete
+                    'source': 'inferred_from_user_type',
+                    'note': 'Detailed permission fields not available in this org - using UserType-based inference'
+                }
                     
-                    if profile_data:
-                        profile_record = profile_data[0]
-                        profiles_data[object_name][profile_name] = {
-                            'profile_id': profile_id,
-                            'user_type': profile['UserType'],
-                            'create': profile_record.get(f'Permissions{object_name}Create', False),
-                            'read': profile_record.get(f'Permissions{object_name}Read', True),  # Most profiles have read access
-                            'edit': profile_record.get(f'Permissions{object_name}Edit', False),
-                            'delete': profile_record.get(f'Permissions{object_name}Delete', False),
-                            'source': 'profile_direct_query'
-                        }
-                    else:
-                        # Fallback: use profile metadata to infer permissions
-                        profiles_data[object_name][profile_name] = {
-                            'profile_id': profile_id,
-                            'user_type': profile['UserType'],
-                            'create': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
-                            'read': True,  # Most profiles have read access
-                            'edit': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
-                            'delete': profile['UserType'] == 'Standard',  # Only Standard profiles typically have delete
-                            'source': 'inferred_from_user_type'
-                        }
-                        
-                except Exception as profile_error:
-                    logger.debug(f"Profile permission query failed for {profile_name} on {object_name}: {profile_error}")
-                    # Use inferred permissions as fallback
-                    profiles_data[object_name][profile_name] = {
-                        'profile_id': profile_id,
-                        'user_type': profile['UserType'],
-                        'create': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
-                        'read': True,
-                        'edit': profile['UserType'] in ['Standard', 'PowerPartner', 'PowerCustomerSuccess'],
-                        'delete': profile['UserType'] == 'Standard',
-                        'source': 'inferred_from_user_type'
-                    }
-                        
     except Exception as e:
         logger.error(f"Error getting profiles with object permissions: {e}")
         return {}
-    
+        
     return profiles_data
 
 def get_permission_sets_with_object_permissions_enhanced(org: str, object_names: List[str]) -> Dict[str, dict]:
