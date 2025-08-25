@@ -900,6 +900,127 @@ def check_existing_security_data(output_dir: Path) -> Optional[Dict[str, Any]]:
             logger.warning(f"Failed to load existing security data: {e}")
     return None
 
+def check_partial_security_data(output_dir: Path) -> Tuple[Dict[str, Any], List[str]]:
+    """Check for partial security data and return completed objects and remaining objects to process."""
+    security_file = output_dir / "security.json"
+    completed_objects = {}
+    remaining_objects = []
+    
+    # Check for existing security data
+    if security_file.exists():
+        try:
+            with open(security_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                completed_objects = data
+                logger.info(f"Found existing security data for {len(data)} objects")
+        except Exception as e:
+            logger.warning(f"Failed to load existing security data: {e}")
+    
+    # Check for progress tracking file
+    progress_file = output_dir / "security_progress.json"
+    if progress_file.exists():
+        try:
+            with open(progress_file, 'r', encoding='utf-8') as f:
+                progress_data = json.load(f)
+                all_objects = progress_data.get('all_objects', [])
+                processed_objects = progress_data.get('processed_objects', [])
+                
+                # Calculate remaining objects
+                remaining_objects = [obj for obj in all_objects if obj not in processed_objects]
+                logger.info(f"Found progress tracking: {len(processed_objects)} processed, {len(remaining_objects)} remaining")
+        except Exception as e:
+            logger.warning(f"Failed to load progress tracking: {e}")
+    
+    return completed_objects, remaining_objects
+
+def save_security_progress(output_dir: Path, all_objects: List[str], processed_objects: List[str], security_data: Dict[str, Any]):
+    """Save security data and progress incrementally."""
+    # Save current security data
+    security_file = output_dir / "security.json"
+    try:
+        with open(security_file, 'w', encoding='utf-8') as f:
+            json.dump(security_data, f, indent=2)
+        logger.info(f"Saved security data for {len(security_data)} objects")
+    except Exception as e:
+        logger.error(f"Failed to save security data: {e}")
+    
+    # Save progress tracking
+    progress_file = output_dir / "security_progress.json"
+    try:
+        progress_data = {
+            'all_objects': all_objects,
+            'processed_objects': processed_objects,
+            'last_updated': datetime.now().isoformat()
+        }
+        with open(progress_file, 'w', encoding='utf-8') as f:
+            json.dump(progress_data, f, indent=2)
+        logger.info(f"Saved progress tracking: {len(processed_objects)}/{len(all_objects)} objects completed")
+    except Exception as e:
+        logger.error(f"Failed to save progress tracking: {e}")
+
+def process_security_batched_with_resume(org: str, object_names: List[str], cache: Optional[SmartCache] = None, output_dir: Path = None) -> Dict[str, dict]:
+    """Process security data with proper resume functionality."""
+    logger.info(f"Processing security data for {len(object_names)} objects with resume capability")
+    
+    # Initialize output directory if not provided
+    if output_dir is None:
+        output_dir = Path("./output")
+    
+    # Check for existing progress
+    existing_data, remaining_objects = check_partial_security_data(output_dir)
+    
+    if not remaining_objects:
+        # All objects already processed
+        logger.info("All objects already processed - using existing security data")
+        return existing_data
+    
+    if existing_data:
+        logger.info(f"Resuming security processing: {len(existing_data)} objects already completed, {len(remaining_objects)} remaining")
+    else:
+        logger.info(f"Starting fresh security processing for {len(remaining_objects)} objects")
+    
+    # Process remaining objects
+    try:
+        # Get field-level security for remaining objects
+        fls_data = get_all_field_level_security_batched(org, remaining_objects)
+        
+        # Get object-level permissions for remaining objects
+        object_permissions_data = get_all_object_permissions_batched(org, remaining_objects)
+        
+        # Get profiles and permission sets (only once, not per object)
+        profiles_and_permission_sets = get_all_profiles_and_permission_sets_batched(org)
+        
+        # Combine security data for remaining objects
+        new_security_data = {}
+        for object_name in remaining_objects:
+            new_security_data[object_name] = {
+                "field_permissions": fls_data.get(object_name, {}).get("field_permissions", []),
+                "object_permissions": object_permissions_data.get(object_name, {}),
+                "profiles": profiles_and_permission_sets.get("profiles", []),
+                "permission_sets": profiles_and_permission_sets.get("permission_sets", [])
+            }
+        
+        # Merge with existing data
+        combined_security_data = {**existing_data, **new_security_data}
+        
+        # Update processed objects list
+        processed_objects = list(combined_security_data.keys())
+        
+        # Save progress incrementally
+        save_security_progress(output_dir, object_names, processed_objects, combined_security_data)
+        
+        logger.info(f"Successfully processed security data for {len(new_security_data)} additional objects")
+        return combined_security_data
+        
+    except Exception as e:
+        logger.error(f"Error processing security data: {e}")
+        # Save partial progress if we have any
+        if existing_data:
+            processed_objects = list(existing_data.keys())
+            save_security_progress(output_dir, object_names, processed_objects, existing_data)
+            logger.info("Saved partial progress - can resume later")
+        return existing_data
+
 def get_sobject_names_from_schema(schema_data: Dict[str, Any]) -> List[str]:
     """Extract SObject names from existing schema data."""
     objects = schema_data.get('objects', {})
@@ -1709,18 +1830,9 @@ def main():
         # Step 4: Process security data (batched) - only if requested and not resuming
         if args.with_security:
             if args.resume:
-                security_data = check_existing_security_data(output_dir)
-                if not security_data:
-                    logger.info("No existing security data found - processing fresh data...")
-                    security_data = process_security_batched(org_alias, sobjects, cache)
-                    
-                    # Save security data
-                    security_file = output_dir / "security.json"
-                    with open(security_file, 'w') as f:
-                        json.dump(security_data, f, indent=2)
-                    logger.info(f"Security data saved to {security_file}")
-                else:
-                    logger.info("Using existing security data (resume mode)")
+                logger.info("Processing security data with resume capability...")
+                security_data = process_security_batched_with_resume(org_alias, sobjects, cache, output_dir)
+                logger.info(f"Security data processing completed for {len(security_data)} objects")
             else:
                 logger.info("Processing security data...")
                 security_data = process_security_batched(org_alias, sobjects, cache)
