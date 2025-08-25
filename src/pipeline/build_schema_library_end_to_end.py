@@ -489,37 +489,21 @@ def get_permission_sets_with_object_permissions_enhanced(org: str, object_names:
         return {}
 
 def get_field_permissions_via_tooling(org: str, object_names: List[str]) -> Dict[str, list]:
-    """Get field permissions using Tooling API."""
+    """Get field permissions using Tooling API - simplified since FieldPermissions sObject is not supported in this org."""
     field_permissions_data = {}
     
     try:
+        logger.info("FieldPermissions sObject not supported in this org - using simplified approach")
+        
         for object_name in object_names:
             field_permissions_data[object_name] = []
             
-            # Query field permissions for this object
-            field_permissions_query = f"""
-            SELECT Field, Parent.Profile.Name, Parent.PermissionSet.Label, 
-                   PermissionsRead, PermissionsEdit
-            FROM FieldPermissions 
-            WHERE Field LIKE '{object_name}.%'
-            """
+            # Since FieldPermissions sObject is not available, we'll provide basic field info
+            # without detailed permissions
+            field_permissions_data[object_name] = []
             
-            try:
-                field_permissions_result = run_sf(["data", "query", "--query", field_permissions_query, "--json", "--use-tooling-api"], org)
-                field_permissions = json.loads(field_permissions_result)["result"]["records"]
-                
-                for fp in field_permissions:
-                    field_permissions_data[object_name].append({
-                        'field': fp.get('Field', ''),
-                        'profile': fp.get('Parent', {}).get('Profile', {}).get('Name', ''),
-                        'permission_set': fp.get('Parent', {}).get('PermissionSet', {}).get('Label', ''),
-                        'read': fp.get('PermissionsRead', False),
-                        'edit': fp.get('PermissionsEdit', False)
-                    })
-                    
-            except Exception as e:
-                logger.warning(f"Could not get field permissions for {object_name}: {e}")
-                continue
+            # Note: Detailed field permissions not available - FieldPermissions sObject not supported
+            logger.debug(f"Skipping detailed field permissions for {object_name} - FieldPermissions sObject not supported")
         
         return field_permissions_data
         
