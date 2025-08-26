@@ -110,13 +110,33 @@ class RAGService:
             # Use higher top_k for more comprehensive context
             top_k = top_k or config.TOP_K  # Now defaults to 10 instead of 5
             
-            # Simple direct approach: Get all documents and filter by object name
-            all_results = self.vector_store.similarity_search("", k=1000)  # Get all results
-            
-            # Filter for specific objects mentioned in query
-            target_objects = []
             query_lower = query.lower()
             
+            # Enhanced search strategy for security-related queries
+            if any(term in query_lower for term in ['crud', 'permission', 'security', 'profile', 'access', 'who can', 'can delete', 'can edit', 'can create', 'can read']):
+                logger.info("Security-related query detected - using enhanced search strategy")
+                
+                # Get all documents for comprehensive security search
+                all_results = self.vector_store.similarity_search("", k=1000)
+                
+                # Filter for documents with security information
+                security_results = []
+                for doc in all_results:
+                    content = getattr(doc, 'page_content', '') or getattr(doc, 'text', '') or str(doc)
+                    content_lower = content.lower()
+                    
+                    # Look for security-related content
+                    if any(term in content_lower for term in ['security', 'permission', 'profile', 'crud', 'create', 'read', 'edit', 'delete', 'access']):
+                        security_results.append(doc)
+                        if len(security_results) >= top_k * 2:  # Get more security results
+                            break
+                
+                if security_results:
+                    logger.info(f"Retrieved {len(security_results)} security-related documents")
+                    return security_results[:top_k]
+            
+            # Standard object-specific search
+            target_objects = []
             if 'account' in query_lower:
                 target_objects.append('account')
             if 'contact' in query_lower:
@@ -130,6 +150,7 @@ class RAGService:
             
             # If specific objects are mentioned, prioritize them
             if target_objects:
+                all_results = self.vector_store.similarity_search("", k=1000)
                 results = []
                 for doc in all_results:
                     object_name = doc.metadata.get('object_name', '').lower()
