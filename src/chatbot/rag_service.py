@@ -112,12 +112,15 @@ class RAGService:
             
             query_lower = query.lower()
             
+            logger.info(f"🔍 SEARCH DEBUG: Query='{query}', top_k={top_k}")
+            
             # Enhanced search strategy for security-related queries
             if any(term in query_lower for term in ['crud', 'permission', 'security', 'profile', 'access', 'who can', 'can delete', 'can edit', 'can create', 'can read']):
-                logger.info("Security-related query detected - using enhanced search strategy")
+                logger.info("🔍 Security-related query detected - using enhanced search strategy")
                 
                 # Get all documents for comprehensive security search
                 all_results = self.vector_store.similarity_search("", k=1000)
+                logger.info(f"🔍 Total documents in vector store: {len(all_results)}")
                 
                 # Filter for documents with security information
                 security_results = []
@@ -132,8 +135,21 @@ class RAGService:
                             break
                 
                 if security_results:
-                    logger.info(f"Retrieved {len(security_results)} security-related documents")
+                    logger.info(f"🔍 Retrieved {len(security_results)} security-related documents")
+                    
+                    # Log details of each security document found
+                    for i, doc in enumerate(security_results[:top_k]):
+                        doc_type = doc.metadata.get('type', 'unknown')
+                        object_name = doc.metadata.get('object_name', 'unknown')
+                        doc_id = doc.metadata.get('id', 'unknown')
+                        logger.info(f"  {i+1}. ID: {doc_id}, Type: {doc_type}, Object: {object_name}")
+                        # Log first 200 chars of content
+                        content_preview = content[:200] + "..." if len(content) > 200 else content
+                        logger.info(f"     Content: {content_preview}")
+                    
                     return security_results[:top_k]
+                else:
+                    logger.warning("🔍 No security-related documents found!")
             
             # Standard object-specific search
             target_objects = []
@@ -166,7 +182,15 @@ class RAGService:
             
             # Fallback to similarity search
             results = self.vector_store.similarity_search(query, k=top_k)
-            logger.info(f"Retrieved {len(results)} documents via similarity search: {[doc.metadata.get('object_name', 'Unknown') for doc in results]}")
+            logger.info(f"🔍 Fallback search found {len(results)} documents")
+            
+            # Log details of each document found
+            for i, doc in enumerate(results):
+                doc_type = doc.metadata.get('type', 'unknown')
+                object_name = doc.metadata.get('object_name', 'unknown')
+                doc_id = doc.metadata.get('id', 'unknown')
+                logger.info(f"  {i+1}. ID: {doc_id}, Type: {doc_type}, Object: {object_name}")
+            
             return results
             
         except Exception as e:

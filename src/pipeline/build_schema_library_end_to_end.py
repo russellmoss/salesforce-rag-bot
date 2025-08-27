@@ -1174,30 +1174,55 @@ def emit_jsonl_files(output_dir: Path, schema_data: Dict[str, Any], automation_d
                 doc_content += "\nSecurity:\n"
                 sec_data = security_data[object_name]
                 
-                # Object permissions
+                # Object permissions from profiles
+                if 'profiles' in sec_data and sec_data['profiles']:
+                    doc_content += "Profile Permissions:\n"
+                    for profile_name, profile_data in sec_data['profiles'].items():
+                        if isinstance(profile_data, dict):
+                            create = profile_data.get('create', False)
+                            read = profile_data.get('read', True)
+                            edit = profile_data.get('edit', False)
+                            delete = profile_data.get('delete', False)
+                            source = profile_data.get('source', 'unknown')
+                            doc_content += f"- {profile_name}: Create={create}, Read={read}, Edit={edit}, Delete={delete} (Source: {source})\n"
+                
+                # Object permissions from permission sets
+                if 'permission_sets' in sec_data and sec_data['permission_sets']:
+                    doc_content += "Permission Set Permissions:\n"
+                    for ps_name, ps_data in sec_data['permission_sets'].items():
+                        if isinstance(ps_data, dict):
+                            create = ps_data.get('create', False)
+                            read = ps_data.get('read', False)
+                            edit = ps_data.get('edit', False)
+                            delete = ps_data.get('delete', False)
+                            source = ps_data.get('source', 'unknown')
+                            note = ps_data.get('note', '')
+                            doc_content += f"- {ps_name}: Create={create}, Read={read}, Edit={edit}, Delete={delete} (Source: {source})"
+                            if note:
+                                doc_content += f" Note: {note}"
+                            doc_content += "\n"
+                
+                # Object permissions (legacy format)
                 if 'object_permissions' in sec_data:
                     obj_perms = sec_data['object_permissions']
-                    if 'profile_permissions' in obj_perms and obj_perms['profile_permissions']:
-                        doc_content += "Profile Permissions:\n"
-                        for perm in obj_perms['profile_permissions']:
-                            profile = perm.get('profile', 'Unknown')
-                            can_delete = perm.get('can_delete', False)
-                            can_edit = perm.get('can_edit', False)
-                            can_create = perm.get('can_create', False)
-                            doc_content += f"- {profile}: Create={can_create}, Edit={can_edit}, Delete={can_delete}\n"
-                    
-                    if 'permission_set_permissions' in obj_perms and obj_perms['permission_set_permissions']:
-                        doc_content += "Permission Set Permissions:\n"
-                        for perm in obj_perms['permission_set_permissions']:
-                            ps_name = perm.get('permission_set', 'Unknown')
-                            can_delete = perm.get('can_delete', False)
-                            can_edit = perm.get('can_edit', False)
-                            can_create = perm.get('can_create', False)
-                            doc_content += f"- {ps_name}: Create={can_create}, Edit={can_edit}, Delete={can_delete}\n"
+                    if isinstance(obj_perms, dict):
+                        for perm_type, perm_data in obj_perms.items():
+                            if isinstance(perm_data, dict):
+                                doc_content += f"{perm_type.title()} Object Permissions:\n"
+                                for name, perms in perm_data.items():
+                                    if isinstance(perms, dict):
+                                        create = perms.get('create', False)
+                                        read = perms.get('read', True)
+                                        edit = perms.get('edit', False)
+                                        delete = perms.get('delete', False)
+                                        doc_content += f"- {name}: Create={create}, Read={read}, Edit={edit}, Delete={delete}\n"
                 
                 # Field permissions
                 if 'field_permissions' in sec_data and sec_data['field_permissions']:
-                    doc_content += f"Field Permissions: {len(sec_data['field_permissions'])} fields with FLS\n"
+                    if isinstance(sec_data['field_permissions'], list):
+                        doc_content += f"Field Permissions: {len(sec_data['field_permissions'])} fields with FLS\n"
+                    elif isinstance(sec_data['field_permissions'], dict):
+                        doc_content += f"Field Permissions: {len(sec_data['field_permissions'])} field permission entries\n"
             
             # Add stats data
             if stats_data and object_name in stats_data:
@@ -1227,6 +1252,66 @@ def emit_jsonl_files(output_dir: Path, schema_data: Dict[str, Any], automation_d
             }
             
             f.write(json.dumps(entry) + "\n")
+    
+    # Add separate security documents for better retrieval
+    if security_data:
+        logger.info("Adding separate security documents to corpus...")
+        for object_name, sec_data in security_data.items():
+            if not isinstance(sec_data, dict):
+                continue
+                
+            # Create security-specific document
+            security_content = f"Security Information for Object: {object_name}\n\n"
+            
+            # Profile permissions
+            if 'profiles' in sec_data and sec_data['profiles']:
+                security_content += "Profile Permissions:\n"
+                for profile_name, profile_data in sec_data['profiles'].items():
+                    if isinstance(profile_data, dict):
+                        create = profile_data.get('create', False)
+                        read = profile_data.get('read', True)
+                        edit = profile_data.get('edit', False)
+                        delete = profile_data.get('delete', False)
+                        source = profile_data.get('source', 'unknown')
+                        security_content += f"- {profile_name}: Create={create}, Read={read}, Edit={edit}, Delete={delete} (Source: {source})\n"
+                security_content += "\n"
+            
+            # Permission set permissions
+            if 'permission_sets' in sec_data and sec_data['permission_sets']:
+                security_content += "Permission Set Permissions:\n"
+                for ps_name, ps_data in sec_data['permission_sets'].items():
+                    if isinstance(ps_data, dict):
+                        create = ps_data.get('create', False)
+                        read = ps_data.get('read', False)
+                        edit = ps_data.get('edit', False)
+                        delete = ps_data.get('delete', False)
+                        source = ps_data.get('source', 'unknown')
+                        note = ps_data.get('note', '')
+                        security_content += f"- {ps_name}: Create={create}, Read={read}, Edit={edit}, Delete={delete} (Source: {source})"
+                        if note:
+                            security_content += f" Note: {note}"
+                        security_content += "\n"
+                security_content += "\n"
+            
+            # Field permissions
+            if 'field_permissions' in sec_data and sec_data['field_permissions']:
+                if isinstance(sec_data['field_permissions'], list):
+                    security_content += f"Field-Level Security: {len(sec_data['field_permissions'])} fields with FLS settings\n"
+                elif isinstance(sec_data['field_permissions'], dict):
+                    security_content += f"Field-Level Security: {len(sec_data['field_permissions'])} field permission entries\n"
+            
+            # Create security document entry
+            security_entry = {
+                "id": f"security_{object_name}",
+                "text": security_content,
+                "metadata": {
+                    "object_name": object_name,
+                    "type": "security_permissions",
+                    "security_type": "crud_permissions"
+                }
+            }
+            
+            f.write(json.dumps(security_entry) + "\n")
     
     logger.info(f"Emitted JSONL file: {jsonl_file}")
 
