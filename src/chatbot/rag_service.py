@@ -125,6 +125,15 @@ class RAGService:
                 # Filter for documents with security information
                 security_results = []
                 for doc in all_results:
+                    # Check metadata type first (more reliable)
+                    doc_type = doc.metadata.get('type', 'unknown')
+                    if doc_type == 'security_permissions':
+                        security_results.append(doc)
+                        if len(security_results) >= top_k * 2:  # Get more security results
+                            break
+                        continue
+                    
+                    # Fallback: Check content for security terms
                     content = getattr(doc, 'page_content', '') or getattr(doc, 'text', '') or str(doc)
                     content_lower = content.lower()
                     
