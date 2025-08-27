@@ -1913,6 +1913,7 @@ def main():
                 logger.info(f"Automation data saved to {automation_file}")
         
         # Step 4: Process security data (batched) - only if requested and not resuming
+        security_data = None
         if args.with_security:
             if args.resume:
                 logger.info("Processing security data with resume capability...")
@@ -1927,6 +1928,14 @@ def main():
                 with open(security_file, 'w') as f:
                     json.dump(security_data, f, indent=2)
                 logger.info(f"Security data saved to {security_file}")
+        elif args.resume:
+            # In resume mode, try to load existing security data even if --with-security not specified
+            logger.info("Resume mode: Loading existing security data...")
+            security_data = check_existing_security_data(output_dir)
+            if security_data:
+                logger.info(f"Loaded existing security data for {len(security_data)} objects")
+            else:
+                logger.info("No existing security data found")
         
         # Step 5: Process stats data (batched) - only if requested and not resuming
         if args.with_stats:
