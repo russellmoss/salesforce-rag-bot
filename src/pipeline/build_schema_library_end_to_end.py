@@ -1298,7 +1298,48 @@ def emit_jsonl_files(output_dir: Path, schema_data: Dict[str, Any], automation_d
                 # Field permissions
                 if 'field_permissions' in sec_data and sec_data['field_permissions']:
                     if isinstance(sec_data['field_permissions'], list):
-                        security_content += f"Field-Level Security: {len(sec_data['field_permissions'])} fields with FLS settings\n"
+                        field_perms = sec_data['field_permissions']
+                        security_content += f"Field-Level Security: {len(field_perms)} fields with FLS settings\n"
+                        
+                        # Add comprehensive field permission information for better searchability
+                        if len(field_perms) > 0:
+                            # Group by profile for better organization
+                            profiles_with_perms = {}
+                            for field_perm in field_perms:
+                                if isinstance(field_perm, dict):
+                                    profile = field_perm.get('profile', 'Unknown')
+                                    if profile not in profiles_with_perms:
+                                        profiles_with_perms[profile] = []
+                                    profiles_with_perms[profile].append(field_perm)
+                            
+                            # Add profile summary
+                            security_content += f"Field permissions across {len(profiles_with_perms)} profiles:\n"
+                            for profile, perms in list(profiles_with_perms.items())[:10]:  # Show first 10 profiles
+                                read_count = sum(1 for p in perms if p.get('read', False))
+                                edit_count = sum(1 for p in perms if p.get('edit', False))
+                                security_content += f"  - {profile}: {len(perms)} fields (Read: {read_count}, Edit: {edit_count})\n"
+                            
+                            if len(profiles_with_perms) > 10:
+                                security_content += f"  ... and {len(profiles_with_perms) - 10} more profiles\n"
+                            
+                            # Add sample field details for key fields
+                            security_content += "\nSample field permissions:\n"
+                            sample_fields = ['Account.Name', 'Account.Type', 'Account.Industry', 'Account.BillingAddress', 'Account.Phone']
+                            for sample_field in sample_fields:
+                                field_perms_for_sample = [p for p in field_perms if p.get('field', '').startswith(sample_field)]
+                                if field_perms_for_sample:
+                                    for field_perm in field_perms_for_sample[:3]:  # Show up to 3 profiles per field
+                                        field_name = field_perm.get('field', 'Unknown')
+                                        profile = field_perm.get('profile', 'Unknown')
+                                        read = field_perm.get('read', False)
+                                        edit = field_perm.get('edit', False)
+                                        security_content += f"  - {field_name}: Profile={profile}, Read={read}, Edit={edit}\n"
+                            
+                            # Add general field permission statistics
+                            total_readable = sum(1 for p in field_perms if p.get('read', False))
+                            total_editable = sum(1 for p in field_perms if p.get('edit', False))
+                            security_content += f"\nField permission summary: {total_readable} readable fields, {total_editable} editable fields\n"
+                            
                     elif isinstance(sec_data['field_permissions'], dict):
                         security_content += f"Field-Level Security: {len(sec_data['field_permissions'])} field permission entries\n"
                 
@@ -1462,6 +1503,7 @@ def push_to_pinecone(output_dir: Path, schema_data: Dict[str, Any], automation_d
                     "id": f"salesforce_object_{object_name}",
                     "values": embedding,
                     "metadata": {
+                        "id": f"salesforce_object_{object_name}",  # Add ID to metadata for LangChain compatibility
                         "object_name": object_name,
                         "type": "salesforce_object",
                         "fields_count": fields_count,
@@ -1494,6 +1536,57 @@ def push_to_pinecone(output_dir: Path, schema_data: Dict[str, Any], automation_d
             index.upsert(vectors=vectors)
         
         logger.info(f"Successfully uploaded {processed_count} objects to Pinecone index: {index_name}")
+        
+        # Now upload security documents from corpus.jsonl if it exists
+        corpus_file = output_dir / "corpus.jsonl"
+        if corpus_file.exists():
+            logger.info("Uploading security documents from corpus.jsonl...")
+            security_count = 0
+            
+            with open(corpus_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    try:
+                        doc = json.loads(line)
+                        
+                        # Only process security documents
+                        if doc.get('metadata', {}).get('type') == 'security_permissions':
+                            # Generate embedding for security document
+                            response = openai_client.embeddings.create(
+                                model="text-embedding-ada-002",
+                                input=doc['text']
+                            )
+                            embedding = response.data[0].embedding
+                            
+                            # Create vector record for security document
+                            vector_record = {
+                                "id": doc['id'],
+                                "values": embedding,
+                                "metadata": {
+                                    "id": doc['id'],  # Add ID to metadata for LangChain compatibility
+                                    "object_name": doc['metadata'].get('object_name', 'unknown'),
+                                    "type": "security_permissions",
+                                    "security_type": doc['metadata'].get('security_type', 'crud_permissions'),
+                                    "content": doc['text'][:1000] + "..." if len(doc['text']) > 1000 else doc['text'],
+                                    "text": doc['text']
+                                }
+                            }
+                            
+                            # Upload immediately (security documents are smaller)
+                            index.upsert(vectors=[vector_record])
+                            security_count += 1
+                            
+                            if security_count % 50 == 0:
+                                logger.info(f"Uploaded {security_count} security documents")
+                                
+                    except Exception as e:
+                        logger.error(f"Error processing security document: {e}")
+                        continue
+            
+            logger.info(f"Successfully uploaded {security_count} security documents to Pinecone")
         
         # Get index stats
         stats = index.describe_index_stats()

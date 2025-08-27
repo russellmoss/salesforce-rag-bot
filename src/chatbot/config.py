@@ -32,6 +32,12 @@ class Config:
     TOP_K: int = int(os.getenv("TOP_K", "10"))  # Increased for more context
     TOP_P: float = float(os.getenv("TOP_P", "0.95"))
     
+    # Performance optimizations for large databases
+    SEARCH_BATCH_SIZE: int = int(os.getenv("SEARCH_BATCH_SIZE", "100"))  # Batch size for searches
+    MAX_SEARCH_RESULTS: int = int(os.getenv("MAX_SEARCH_RESULTS", "1000"))  # Max results to process
+    ENABLE_SEARCH_CACHING: bool = os.getenv("ENABLE_SEARCH_CACHING", "true").lower() == "true"
+    CACHE_TTL_SECONDS: int = int(os.getenv("CACHE_TTL_SECONDS", "300"))  # 5 minutes cache TTL
+    
     # Additional settings for thorough responses
     MAX_CONTEXT_LENGTH: int = int(os.getenv("MAX_CONTEXT_LENGTH", "32000"))  # Large context window
     RESPONSE_MODE: str = os.getenv("RESPONSE_MODE", "thorough")  # thorough, concise, or detailed
