@@ -37,7 +37,7 @@ jobs:
 
       - name: Authenticate to Salesforce
         run: |
-          echo "${{ secrets.SFDX_AUTH_URL }}" | sf org login sfdx-url --sfdx-url-stdin --set-default-dev-hub
+          echo "?? Authenticating to Salesforce..."; echo "${{ secrets.SFDX_AUTH_URL }}" > sfdx_auth.url; sf org login sfdx-url --sfdx-url-file sfdx_auth.url --alias "${{ secrets.SF_ORG_ALIAS }}" --set-default; echo "? Verifying authentication..."; sf org display --target-org "${{ secrets.SF_ORG_ALIAS }}"; echo "?? Authenticated orgs:"; sf org list; rm sfdx_auth.url
 
       - name: Run Schema Pipeline
         run: |
