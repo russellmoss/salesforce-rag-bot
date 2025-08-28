@@ -45,6 +45,7 @@ jobs:
             --org-alias "${{ secrets.SF_ORG_ALIAS }}" \
             --output ./output \
             --with-metadata \
+            --with-validation \
             --emit-markdown \
             --emit-jsonl \
             --push-to-pinecone \
