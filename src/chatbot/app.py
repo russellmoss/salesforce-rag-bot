@@ -9,7 +9,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from config import config
-from rag_service import RAGService
+from enhanced_rag_service import EnhancedRAGService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -93,12 +93,12 @@ def initialize_rag_service():
         if not pinecone_key or not any([openai_key, anthropic_key, google_key]):
             return None
             
-        return RAGService()
+        return EnhancedRAGService()
     except Exception as e:
         logger.error(f"Failed to initialize RAG service: {str(e)}")
         return None
 
-def display_status(rag_service: RAGService):
+def display_status(rag_service: EnhancedRAGService):
     """Display the status of the RAG service"""
     status = rag_service.get_status()
     

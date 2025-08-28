@@ -1537,11 +1537,11 @@ def push_to_pinecone(output_dir: Path, schema_data: Dict[str, Any], automation_d
         
         logger.info(f"Successfully uploaded {processed_count} objects to Pinecone index: {index_name}")
         
-        # Now upload security documents from corpus.jsonl if it exists
+        # Now upload ALL documents from corpus.jsonl if it exists
         corpus_file = output_dir / "corpus.jsonl"
         if corpus_file.exists():
-            logger.info("Uploading security documents from corpus.jsonl...")
-            security_count = 0
+            logger.info("Uploading ALL documents from corpus.jsonl...")
+            doc_count = 0
             
             with open(corpus_file, 'r', encoding='utf-8') as f:
                 for line in f:
@@ -1552,41 +1552,43 @@ def push_to_pinecone(output_dir: Path, schema_data: Dict[str, Any], automation_d
                     try:
                         doc = json.loads(line)
                         
-                        # Only process security documents
-                        if doc.get('metadata', {}).get('type') == 'security_permissions':
-                            # Generate embedding for security document
-                            response = openai_client.embeddings.create(
-                                model="text-embedding-ada-002",
-                                input=doc['text']
-                            )
-                            embedding = response.data[0].embedding
-                            
-                            # Create vector record for security document
-                            vector_record = {
-                                "id": doc['id'],
-                                "values": embedding,
-                                "metadata": {
-                                    "id": doc['id'],  # Add ID to metadata for LangChain compatibility
-                                    "object_name": doc['metadata'].get('object_name', 'unknown'),
-                                    "type": "security_permissions",
-                                    "security_type": doc['metadata'].get('security_type', 'crud_permissions'),
-                                    "content": doc['text'][:1000] + "..." if len(doc['text']) > 1000 else doc['text'],
-                                    "text": doc['text']
-                                }
+                        # Process ALL documents (not just security documents)
+                        # Generate embedding for document
+                        response = openai_client.embeddings.create(
+                            model="text-embedding-ada-002",
+                            input=doc['text']
+                        )
+                        embedding = response.data[0].embedding
+                        
+                        # Create vector record for document
+                        vector_record = {
+                            "id": doc['id'],
+                            "values": embedding,
+                            "metadata": {
+                                "id": doc['id'],  # Add ID to metadata for LangChain compatibility
+                                "object_name": doc['metadata'].get('object_name', 'unknown'),
+                                "type": doc['metadata'].get('type', 'unknown'),
+                                "content": doc['text'][:1000] + "..." if len(doc['text']) > 1000 else doc['text'],
+                                "text": doc['text']
                             }
-                            
-                            # Upload immediately (security documents are smaller)
-                            index.upsert(vectors=[vector_record])
-                            security_count += 1
-                            
-                            if security_count % 50 == 0:
-                                logger.info(f"Uploaded {security_count} security documents")
+                        }
+                        
+                        # Add security-specific metadata if it's a security document
+                        if doc.get('metadata', {}).get('type') == 'security_permissions':
+                            vector_record["metadata"]["security_type"] = doc['metadata'].get('security_type', 'crud_permissions')
+                        
+                        # Upload immediately
+                        index.upsert(vectors=[vector_record])
+                        doc_count += 1
+                        
+                        if doc_count % 50 == 0:
+                            logger.info(f"Uploaded {doc_count} documents")
                                 
                     except Exception as e:
-                        logger.error(f"Error processing security document: {e}")
+                        logger.error(f"Error processing document: {e}")
                         continue
             
-            logger.info(f"Successfully uploaded {security_count} security documents to Pinecone")
+            logger.info(f"Successfully uploaded {doc_count} documents to Pinecone")
         
         # Get index stats
         stats = index.describe_index_stats()
