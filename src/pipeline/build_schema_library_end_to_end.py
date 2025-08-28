@@ -1036,7 +1036,7 @@ def get_sobject_names_from_schema(schema_data: Dict[str, Any]) -> List[str]:
         logger.warning(f"Unexpected objects format: {type(objects)}")
         return []
 
-def emit_markdown_files(output_dir: Path, schema_data: Dict[str, Any], automation_data: Optional[Dict[str, Any]] = None, stats_data: Optional[Dict[str, Any]] = None):
+def emit_markdown_files(output_dir: Path, schema_data: Dict[str, Any], automation_data: Optional[Dict[str, Any]] = None, security_data: Optional[Dict[str, Any]] = None, stats_data: Optional[Dict[str, Any]] = None):
     """Emit markdown files for each object."""
     logger.info("Emitting markdown files...")
     
