@@ -9,7 +9,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from config import config
-from enhanced_rag_service import EnhancedRAGService
+from rag_service import RAGService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -68,7 +68,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_resource
+@st.cache_resource(ttl=300)  # Cache for 5 minutes only
 def initialize_rag_service():
     """Initialize the RAG service with caching"""
     try:
@@ -93,12 +93,12 @@ def initialize_rag_service():
         if not pinecone_key or not any([openai_key, anthropic_key, google_key]):
             return None
             
-        return EnhancedRAGService()
+        return RAGService()
     except Exception as e:
         logger.error(f"Failed to initialize RAG service: {str(e)}")
         return None
 
-def display_status(rag_service: EnhancedRAGService):
+def display_status(rag_service: RAGService):
     """Display the status of the RAG service"""
     status = rag_service.get_status()
     
@@ -307,6 +307,11 @@ def main():
     if st.sidebar.button("🗑️ Clear Chat History"):
         st.session_state.messages = []
         st.session_state.context_info = {}
+        st.rerun()
+    
+    # Clear cache button
+    if st.sidebar.button("🔄 Refresh RAG Service"):
+        st.cache_resource.clear()
         st.rerun()
 
 if __name__ == "__main__":

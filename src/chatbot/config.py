@@ -29,7 +29,7 @@ class Config:
     # RAG Configuration - Optimized for Thorough Responses
     MAX_TOKENS: int = int(os.getenv("MAX_TOKENS", "16000"))  # Increased for comprehensive responses
     TEMPERATURE: float = float(os.getenv("TEMPERATURE", "0.1"))
-    TOP_K: int = int(os.getenv("TOP_K", "10"))  # Increased for more context
+    TOP_K: int = int(os.getenv("TOP_K", "20"))  # Increased for more context
     TOP_P: float = float(os.getenv("TOP_P", "0.95"))
     
     # Performance optimizations for large databases
